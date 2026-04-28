@@ -83,7 +83,7 @@ async def send_to_browsers(instance_id, msg_raw, exclude_ws=None):
 
 _AGENT_PY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'agent.py')
 def _load_agent_py():
-    with open(_AGENT_PY_PATH, 'r') as f:
+    with open(_AGENT_PY_PATH, 'r', encoding='utf-8') as f:
         return f.read()
 
 AGENT_PY = _load_agent_py()  # loaded once at startup; restart relay to pick up changes
@@ -408,6 +408,96 @@ def build_script(relay_ws, instance_id, token, browser_pub, client_name='Unknown
     script = script.replace('{CLIENT_NAME}', client_name)
     return script
 
+
+DEVICE_SCRIPT_PS1_TEMPLATE = r"""
+$RELAY_WS = "{RELAY_WS}"
+$RELAY_HTTP = "{RELAY_HTTP}"
+$INSTANCE_ID = "{INSTANCE_ID}"
+$TOKEN = "{TOKEN}"
+$BROWSER_PUB = "{BROWSER_PUB}"
+$CLIENT_NAME = "{CLIENT_NAME}"
+
+$INFERO_DIR = "$env:APPDATA\infero"
+$VENV_DIR = "$INFERO_DIR\venv"
+$AGENT = "$INFERO_DIR\agent.py"
+
+New-Item -ItemType Directory -Force -Path $INFERO_DIR | Out-Null
+
+if (-not (Test-Path "$VENV_DIR\Scripts\python.exe")) {
+    Write-Host "[infero] Creating virtual environment..."
+    python -m venv $VENV_DIR
+}
+Write-Host "[infero] Installing requirements..."
+& "$VENV_DIR\Scripts\pip.exe" install -q cryptography websockets aiohttp
+Write-Host "[infero] Dependencies ready"
+
+Write-Host "[infero] Downloading agent..."
+Invoke-WebRequest -Uri "$RELAY_HTTP/update" -OutFile $AGENT -UseBasicParsing
+if (-not (Test-Path $AGENT) -or (Get-Item $AGENT).Length -eq 0) {
+    Write-Error "[infero] Failed to download agent.py"; exit 1
+}
+
+$env:INSTANCE_ID = $INSTANCE_ID; $env:TOKEN = $TOKEN
+$env:BROWSER_PUB = $BROWSER_PUB; $env:RELAY_WS = $RELAY_WS
+$env:CLIENT_NAME = $CLIENT_NAME; $env:INFERO_DIR = $INFERO_DIR
+
+& "$VENV_DIR\Scripts\python.exe" -c @"
+import json, os
+from datetime import datetime
+f = os.path.join(os.environ['INFERO_DIR'], 'instances.json')
+try: instances = json.load(open(f))
+except: instances = []
+iid = os.environ['INSTANCE_ID']
+existing = next((i for i in instances if i.get('instance_id') == iid), None)
+first_added = existing.get('first_added') if existing else datetime.now().strftime('%b %d, %Y, %H:%M')
+instances = [i for i in instances if i.get('instance_id') != iid]
+instances.append({'instance_id': iid, 'token': os.environ['TOKEN'],
+                  'browser_pub': os.environ['BROWSER_PUB'], 'relay_ws': os.environ['RELAY_WS'],
+                  'client_name': os.environ['CLIENT_NAME'], 'first_added': first_added})
+json.dump(instances, open(f, 'w'), indent=2)
+"@
+Write-Host "[infero] Instance saved"
+
+$Action = New-ScheduledTaskAction -Execute "$VENV_DIR\Scripts\python.exe" -Argument "-u `"$AGENT`""
+$Trigger = New-ScheduledTaskTrigger -AtLogOn
+$Settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "InferoDevice" -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
+Write-Host "[infero] Auto-start registered (Task Scheduler)"
+
+$VFILE = "$INFERO_DIR\verify_${INSTANCE_ID}.tmp"
+Remove-Item $VFILE -ErrorAction SilentlyContinue
+Write-Host ""
+Write-Host "[infero] Connecting to relay..."
+Start-Process -WindowStyle Hidden -FilePath "$VENV_DIR\Scripts\python.exe" -ArgumentList "-u `"$AGENT`""
+$VWORDS = ""
+for ($i = 0; $i -lt 20; $i++) {
+    Start-Sleep -Seconds 1
+    if (Test-Path $VFILE) {
+        $VWORDS = Get-Content $VFILE -Raw
+        Remove-Item $VFILE -ErrorAction SilentlyContinue
+        break
+    }
+}
+
+Write-Host ""
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+Write-Host " Pairing request sent"
+if ($VWORDS) { Write-Host " Verify Words: $VWORDS" }
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+Write-Host "  This device will auto-connect on every login."
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+"""
+
+def build_script_ps1(relay_ws, instance_id, token, browser_pub, client_name='Unknown', relay_http=None):
+    if relay_http is None:
+        relay_http = relay_ws.replace('wss://', 'https://').replace('ws://', 'http://').replace('/ws', '')
+    s = DEVICE_SCRIPT_PS1_TEMPLATE
+    for k, v in [('RELAY_WS', relay_ws), ('RELAY_HTTP', relay_http),
+                 ('INSTANCE_ID', instance_id), ('TOKEN', token),
+                 ('BROWSER_PUB', browser_pub), ('CLIENT_NAME', client_name)]:
+        s = s.replace('{' + k + '}', v)
+    return s
+
 # ─── HTTP handlers ──────────────────────────────────────────────────────────────
 
 async def handle_pair_create(request):
@@ -441,7 +531,7 @@ async def handle_pair_create(request):
         pending_pairs.pop(code, None)
     asyncio.create_task(cleanup())
 
-    return web.json_response({'code': code})
+    return web.json_response({'code': code}, headers={'Access-Control-Allow-Origin': '*'})
 
 
 async def handle_pair_get(request):
@@ -478,6 +568,33 @@ async def handle_pair_get(request):
         content_type='text/x-shellscript',
         headers={'Content-Disposition': 'inline; filename="infero_connect.sh"'}
     )
+
+
+async def handle_pair_get_ps1(request):
+    ip = request.remote
+    if not _rate_limit_ok(ip, 'pair_get', max_requests=20, window_seconds=300):
+        return web.Response(status=429, text='Write-Error "[infero] Rate limit exceeded."')
+    code = request.match_info['code'].upper()
+    entry = pending_pairs.get(code)
+    if not entry or time.time() > entry['expires']:
+        pending_pairs.pop(code, None)
+        return web.Response(text='Write-Error "[infero] Code not found or expired."', content_type='text/plain')
+    instance_id = entry['instance_id']
+    client_name = entry.get('client_name', 'Unknown')
+    browser_pub = entry['browser_pub']
+    token = secrets.token_urlsafe(32)
+    device_tokens[token] = f"{instance_id}:__pending__"
+    save_tokens()
+    pending_pairs.pop(code, None)
+    req_host = request.host.split(':')[0]  # IP or hostname without port
+    http_port = int(os.environ.get('HTTP_PORT', 8080))
+    ws_port = int(os.environ.get('WS_PORT', 8081))
+    relay_http = os.environ.get('RELAY_HTTP_URL', f'http://{req_host}:{http_port}')
+    relay_ws = os.environ.get('RELAY_WS_URL', f'ws://{req_host}:{ws_port}')
+    script = build_script_ps1(relay_ws, instance_id, token, browser_pub, client_name, relay_http)
+    return web.Response(text=script, content_type='text/plain',
+                        headers={'Content-Disposition': 'inline; filename="infero_connect.ps1"',
+                                 'Access-Control-Allow-Origin': '*'})
 
 
 # ─── WebSocket handler ──────────────────────────────────────────────────────────
@@ -736,8 +853,21 @@ async def main():
     load_tokens()
 
     # HTTP server
-    app = web.Application()
+    @web.middleware
+    async def cors_middleware(request, handler):
+        if request.method == 'OPTIONS':
+            return web.Response(headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type',
+            })
+        response = await handler(request)
+        response.headers.setdefault('Access-Control-Allow-Origin', '*')
+        return response
+
+    app = web.Application(middlewares=[cors_middleware])
     app.router.add_post('/pair/create', handle_pair_create)
+    app.router.add_get('/pair/{code}/ps1', handle_pair_get_ps1)
     app.router.add_get('/pair/{code}', handle_pair_get)
     app.router.add_get('/update', handle_update)
     app.router.add_get('/bip39', handle_bip39)

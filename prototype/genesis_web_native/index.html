@@ -1271,7 +1271,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             vision: 'half',
             preview: false,
             thinking: true,
-            relayUrl: _isLocalHost ? 'wss://infero.net/device-relay/ws' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/device-relay/ws`,
+            relayUrl: _isLocalHost ? 'ws://localhost:8081' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/device-relay/ws`,
             devices: {},
             hostDevice: 'this browser',
         };
@@ -2140,8 +2140,10 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             statusEl.textContent = 'Requesting pairing code...';
             statusEl.style.cssText = '';
             try {
-                const relayHttpUrl = (settings.relayUrl || SETTINGS_DEFAULTS.relayUrl)
-                    .replace('wss://', 'https://').replace('ws://', 'http://').replace(/\/ws$/, '');
+                const _relayWsUrl = settings.relayUrl || SETTINGS_DEFAULTS.relayUrl;
+                const relayHttpUrl = _isLocalHost
+                    ? 'http://localhost:8080'
+                    : _relayWsUrl.replace('wss://', 'https://').replace('ws://', 'http://').replace(/\/ws$/, '');
                 const ua = navigator.userAgent;
                 const bName = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' :
                     /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' :
@@ -2162,8 +2164,11 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 });
                 if (!res.ok) throw new Error(`Server error: ${res.status}`);
                 const { code } = await res.json();
-                const curlCmd = `curl ${relayHttpUrl}/pair/${code} | sh`;
-                document.getElementById('pair-cmd-text').textContent = curlCmd;
+                const isWindows = osName === 'Windows';
+                const installCmd = isWindows
+                    ? `irm ${relayHttpUrl}/pair/${code}/ps1 | iex`
+                    : `curl ${relayHttpUrl}/pair/${code} | sh`;
+                document.getElementById('pair-cmd-text').textContent = installCmd;
                 document.getElementById('pair-status').textContent = 'Click to copy. Waiting for device... (expires in 5 min)';
                 window._pendingPairKey = { privateKey: ecKeyPair.privateKey };
             } catch (e) {

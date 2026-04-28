@@ -351,7 +351,10 @@ class GenesisWorker:
     def _build_realtime(self):
         lines = ''
         # Self (this device, the current loop host)
+        _os_info = 'Windows (PowerShell)' if sys.platform == 'win32' else ('macOS' if sys.platform == 'darwin' else 'Linux')
+        _shell_info = 'powershell' if sys.platform == 'win32' else 'bash'
         lines += f'\n  - {DEVICE_NAME}(online, shell) [core loop host]'
+        lines += f'\n    - OS: {_os_info}, Shell: {_shell_info}'
         lines += '\n    - Core loop (read or modify with caution):'
         lines += '\n      async def loop(): await perceive(); B = await infer(); await act(B); if /self_continue in B: repeat; if /call_for_trigger: sleep'
         lines += f'\n    - Being ID: {self.being_id}'
@@ -755,9 +758,15 @@ class GenesisWorker:
     async def _exec_local_shell(self, cmd):
         self._log(f"[{ts()}] [infero] shell exec (local): {cmd[:60]}")
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                start_new_session=True)  # isolate process group
+            if sys.platform == 'win32':
+                proc = await asyncio.create_subprocess_exec(
+                    'powershell', '-NoProfile', '-NonInteractive', '-Command', cmd,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    creationflags=0x00000200)  # CREATE_NEW_PROCESS_GROUP
+            else:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True)
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
                 out = ''
@@ -898,11 +907,17 @@ async def connect_instance(cfg):
                     try:
                         cmd = decrypt(cipher, payload_raw)['cmd']
                         log(cfg['relay_ws'], f"[{ts()}] [infero] exec ({iid}): {cmd[:60]}")
-                        proc = await asyncio.create_subprocess_shell(
-                            cmd,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
-                        )
+                        if sys.platform == 'win32':
+                            proc = await asyncio.create_subprocess_exec(
+                                'powershell', '-NoProfile', '-NonInteractive', '-Command', cmd,
+                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                creationflags=0x00000200)
+                        else:
+                            proc = await asyncio.create_subprocess_shell(
+                                cmd,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE
+                            )
                         try:
                             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
                             payload = encrypt(cipher, {"stdout": stdout.decode(), "stderr": stderr.decode(), "exit_code": proc.returncode})
