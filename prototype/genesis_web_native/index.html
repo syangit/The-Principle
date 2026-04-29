@@ -1058,6 +1058,16 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             user-select: all;
         }
         .pair-cmd:hover { border-color: var(--accent); }
+        .pair-os-btn {
+            background: transparent; border: 1px solid var(--border);
+            color: var(--text-dim); padding: 4px 10px;
+            border-radius: 3px; cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.68rem; letter-spacing: 0.5px;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+        }
+        .pair-os-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .pair-os-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
         .pair-close {
             background: transparent; border: 1px solid var(--border);
             color: var(--text-dim); padding: 6px 14px;
@@ -1079,7 +1089,12 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
     <div id="pair-modal" class="hidden">
         <div class="pair-box">
             <h3>Connect Device</h3>
-            <p>Run this command on the machine you want to connect:</p>
+            <p>Select the target OS, then run the command on the device you want to connect:</p>
+            <div style="display:flex;gap:6px;margin-bottom:14px">
+                <button class="pair-os-btn" onclick="selectPairOS('Windows')">Windows</button>
+                <button class="pair-os-btn" onclick="selectPairOS('macOS')">macOS</button>
+                <button class="pair-os-btn" onclick="selectPairOS('Linux')">Linux</button>
+            </div>
             <div class="pair-cmd" id="pair-cmd-text" onclick="navigator.clipboard.writeText(this.textContent).then(()=>{this.style.borderColor='var(--accent)';setTimeout(()=>this.style.borderColor='',1400)})">Generating...</div>
             <p id="pair-status">Waiting for device to connect... (expires in 5 min)</p>
             <div style="display:flex;gap:8px">
@@ -2133,25 +2148,37 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             connect();
         }
 
+        function selectPairOS(os) {
+            window._pairSelectedOS = os;
+            document.querySelectorAll('.pair-os-btn').forEach(b =>
+                b.classList.toggle('active', b.textContent === os));
+            if (window._pairCode && window._pairRelayHttpUrl) {
+                const cmd = os === 'Windows'
+                    ? `irm ${window._pairRelayHttpUrl}/pair/${window._pairCode}/ps1 | iex`
+                    : `curl ${window._pairRelayHttpUrl}/pair/${window._pairCode} | sh`;
+                document.getElementById('pair-cmd-text').textContent = cmd;
+            }
+        }
+
         async function startPairing() {
             document.getElementById('pair-modal').classList.remove('hidden');
             document.getElementById('pair-cmd-text').textContent = 'Generating...';
             const statusEl = document.getElementById('pair-status');
             statusEl.textContent = 'Requesting pairing code...';
             statusEl.style.cssText = '';
+            const ua = navigator.userAgent;
+            const detectedOS = /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : 'Linux';
+            if (!window._pairSelectedOS) window._pairSelectedOS = detectedOS;
+            selectPairOS(window._pairSelectedOS);
             try {
                 const _relayWsUrl = settings.relayUrl || SETTINGS_DEFAULTS.relayUrl;
                 const relayHttpUrl = _isLocalHost
                     ? 'http://localhost:8080'
                     : _relayWsUrl.replace('wss://', 'https://').replace('ws://', 'http://').replace(/\/ws$/, '');
-                const ua = navigator.userAgent;
                 const bName = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' :
                     /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' :
                     /Firefox\//.test(ua) ? 'Firefox' : 'Browser';
-                const osName = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' :
-                    /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' :
-                    /Linux/.test(ua) ? 'Linux' : 'Unknown';
-                const clientName = `${bName} · ${osName}`;
+                const clientName = `${bName} · ${window._pairSelectedOS}`;
                 const ecKeyPair = await crypto.subtle.generateKey(
                     { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']
                 );
@@ -2164,11 +2191,9 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 });
                 if (!res.ok) throw new Error(`Server error: ${res.status}`);
                 const { code } = await res.json();
-                const isWindows = osName === 'Windows';
-                const installCmd = isWindows
-                    ? `irm ${relayHttpUrl}/pair/${code}/ps1 | iex`
-                    : `curl ${relayHttpUrl}/pair/${code} | sh`;
-                document.getElementById('pair-cmd-text').textContent = installCmd;
+                window._pairCode = code;
+                window._pairRelayHttpUrl = relayHttpUrl;
+                selectPairOS(window._pairSelectedOS);
                 document.getElementById('pair-status').textContent = 'Click to copy. Waiting for device... (expires in 5 min)';
                 window._pendingPairKey = { privateKey: ecKeyPair.privateKey };
             } catch (e) {
@@ -2180,6 +2205,9 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         function closePairModal() {
             document.getElementById('pair-modal').classList.add('hidden');
             window._pendingPairKey = null;
+            window._pairSelectedOS = null;
+            window._pairCode = null;
+            window._pairRelayHttpUrl = null;
         }
 
         async function importDeviceKey(keyB64) {
