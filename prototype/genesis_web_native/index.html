@@ -1090,10 +1090,14 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         <div class="pair-box">
             <h3>Connect Device</h3>
             <p>Select the target OS, then run the command on the device you want to connect:</p>
-            <div style="display:flex;gap:6px;margin-bottom:14px">
+            <div style="display:flex;gap:6px;margin-bottom:12px">
                 <button class="pair-os-btn" onclick="selectPairOS('Windows')">Windows</button>
                 <button class="pair-os-btn" onclick="selectPairOS('macOS')">macOS</button>
                 <button class="pair-os-btn" onclick="selectPairOS('Linux')">Linux</button>
+            </div>
+            <div id="pair-relay-row" style="display:none;align-items:center;gap:6px;margin-bottom:12px">
+                <span style="color:var(--text-dim);font-size:0.62rem;letter-spacing:0.5px;text-transform:uppercase;white-space:nowrap">Device Relay</span>
+                <input type="text" id="pair-relay-url" placeholder="localhost" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;font-family:'JetBrains Mono',monospace;font-size:0.68rem;border-radius:3px">
             </div>
             <div class="pair-cmd" id="pair-cmd-text" onclick="navigator.clipboard.writeText(this.textContent).then(()=>{this.style.borderColor='var(--accent)';setTimeout(()=>this.style.borderColor='',1400)})">Generating...</div>
             <p id="pair-status">Waiting for device to connect... (expires in 5 min)</p>
@@ -2044,7 +2048,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         var _relayPongTimer = null;
 
         function initRelay() {
-            const url = settings.relayUrl || SETTINGS_DEFAULTS.relayUrl;
+            const url = settings.relayHost ? `ws://${settings.relayHost}:8081` : (settings.relayUrl || SETTINGS_DEFAULTS.relayUrl);
             if (!url) return;
             let _retryCount = 0;
             let _retryTimer = null;
@@ -2161,6 +2165,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         }
 
         async function startPairing() {
+            const _isFirstOpen = document.getElementById('pair-modal').classList.contains('hidden');
             document.getElementById('pair-modal').classList.remove('hidden');
             document.getElementById('pair-cmd-text').textContent = 'Generating...';
             const statusEl = document.getElementById('pair-status');
@@ -2170,11 +2175,12 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             const detectedOS = /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : 'Linux';
             if (!window._pairSelectedOS) window._pairSelectedOS = detectedOS;
             selectPairOS(window._pairSelectedOS);
+            document.getElementById('pair-relay-row').style.display = _isLocalHost ? 'flex' : 'none';
+            if (_isFirstOpen) document.getElementById('pair-relay-url').value = settings.relayHost || '';
             try {
-                const _relayWsUrl = settings.relayUrl || SETTINGS_DEFAULTS.relayUrl;
-                const relayHttpUrl = _isLocalHost
-                    ? 'http://localhost:8080'
-                    : _relayWsUrl.replace('wss://', 'https://').replace('ws://', 'http://').replace(/\/ws$/, '');
+                const _relayHost = document.getElementById('pair-relay-url').value.trim() || 'localhost';
+                const relayHttpUrl = `http://${_relayHost}:8080`;
+                const relayWsUrl = `ws://${_relayHost}:8081`;
                 const bName = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' :
                     /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' :
                     /Firefox\//.test(ua) ? 'Firefox' : 'Browser';
@@ -2208,6 +2214,13 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             window._pairSelectedOS = null;
             window._pairCode = null;
             window._pairRelayHttpUrl = null;
+            const _newHost = (document.getElementById('pair-relay-url')?.value || '').trim() || undefined;
+            if (_newHost !== settings.relayHost) {
+                settings.relayHost = _newHost;
+                saveSettingsToStorage(settings);
+                if (_relayWs) { _relayWs.onclose = null; _relayWs.close(); _relayWs = null; _relayConnected = false; }
+                initRelay();
+            }
         }
 
         async function importDeviceKey(keyB64) {
