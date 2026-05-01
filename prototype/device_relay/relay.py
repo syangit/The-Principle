@@ -128,7 +128,7 @@ curl -fsSL "$RELAY_HTTP/update" -o "$AGENT"
 if [ ! -s "$AGENT" ]; then echo "[infero] Failed to download agent.py"; exit 1; fi
 
 # ── Update instances.json (append or update this instance) ───────────────────
-INSTANCE_ID="$INSTANCE_ID" TOKEN="$TOKEN" BROWSER_PUB="$BROWSER_PUB" RELAY_WS="$RELAY_WS" CLIENT_NAME="$CLIENT_NAME" INFERO_DIR="$INFERO_DIR" \
+INSTANCE_ID="$INSTANCE_ID" TOKEN="$TOKEN" BROWSER_PUB="$BROWSER_PUB" RELAY_WS="$RELAY_WS" RELAY_HTTP="$RELAY_HTTP" CLIENT_NAME="$CLIENT_NAME" INFERO_DIR="$INFERO_DIR" \
 "$VENV_DIR/bin/python3" -c "
 import json, os
 from datetime import datetime
@@ -141,7 +141,7 @@ first_added = existing.get('first_added') if existing else datetime.now().strfti
 instances = [i for i in instances if i.get('instance_id') != iid]
 instances.append({'instance_id': iid, 'token': os.environ['TOKEN'],
                   'browser_pub': os.environ['BROWSER_PUB'], 'relay_ws': os.environ['RELAY_WS'],
-                  'client_name': os.environ['CLIENT_NAME'],
+                  'relay_http': os.environ['RELAY_HTTP'], 'client_name': os.environ['CLIENT_NAME'],
                   'first_added': first_added})
 json.dump(instances, open(f, 'w'), indent=2)
 "
@@ -439,7 +439,7 @@ if (-not (Test-Path $AGENT) -or (Get-Item $AGENT).Length -eq 0) {
 
 $env:INSTANCE_ID = $INSTANCE_ID; $env:TOKEN = $TOKEN
 $env:BROWSER_PUB = $BROWSER_PUB; $env:RELAY_WS = $RELAY_WS
-$env:CLIENT_NAME = $CLIENT_NAME; $env:INFERO_DIR = $INFERO_DIR
+$env:RELAY_HTTP = $RELAY_HTTP; $env:CLIENT_NAME = $CLIENT_NAME; $env:INFERO_DIR = $INFERO_DIR
 
 & "$VENV_DIR\Scripts\python.exe" -c @"
 import json, os
@@ -453,7 +453,8 @@ first_added = existing.get('first_added') if existing else datetime.now().strfti
 instances = [i for i in instances if i.get('instance_id') != iid]
 instances.append({'instance_id': iid, 'token': os.environ['TOKEN'],
                   'browser_pub': os.environ['BROWSER_PUB'], 'relay_ws': os.environ['RELAY_WS'],
-                  'client_name': os.environ['CLIENT_NAME'], 'first_added': first_added})
+                  'relay_http': os.environ['RELAY_HTTP'], 'client_name': os.environ['CLIENT_NAME'],
+                  'first_added': first_added})
 json.dump(instances, open(f, 'w'), indent=2)
 "@
 Write-Host "[infero] Instance saved"
@@ -615,14 +616,17 @@ async def ws_handler(websocket):
             browser_conns.setdefault(instance_id, []).append(websocket)
             role = 'browser'
             print(f"[{ts()}] [relay] Browser connected: {instance_id[:12]}... ({len(browser_conns[instance_id])} total)")
-            # Push current online devices for this instance
+            # Push current online devices for this instance (include device_pub so browser can complete key exchange)
             for key, info in device_conns.items():
                 if info['instance_id'] == instance_id:
                     try:
                         await websocket.send(json.dumps({
                             'type': 'device_status',
                             'device_name': info['device_name'],
-                            'online': True
+                            'device_type': info.get('device_type', 'shell'),
+                            'online': True,
+                            'fresh_pair': False,
+                            'device_pub': info.get('device_pub', '')
                         }))
                     except Exception:
                         pass
@@ -646,7 +650,8 @@ async def ws_handler(websocket):
                 'instance_id': instance_id,
                 'device_name': device_name,
                 'device_type': device_type,
-                'token': token
+                'token': token,
+                'device_pub': msg.get('device_pub', '')
             }
             role = 'device'
             print(f"[{ts()}] [relay] Device connected: {device_name} (instance {instance_id[:12]}...)")
@@ -675,8 +680,8 @@ async def ws_handler(websocket):
 
             # ─── Distributed loop messages (any role can send) ────────────
             # Broadcast to all other nodes in this instance
-            # loop_status: device→browsers only (device_name is sender, not target)
-            if mtype == 'loop_status':
+            # loop_status / rekeying_response: device→browsers only
+            if mtype in ('loop_status', 'rekeying_response'):
                 await send_to_browsers(instance_id, raw)
                 continue
             if mtype in ('stream_token', 'exec_display', 'settings_update'):
@@ -688,7 +693,8 @@ async def ws_handler(websocket):
                 continue
             # Forward to a specific device by name
             if mtype in ('loop_handoff', 'loop_stop', 'exec_request', 'exec_result',
-                         'user_input', 'request_device_data', 'device_data_response'):
+                         'user_input', 'request_device_data', 'device_data_response',
+                         'rekeying_request'):
                 target_name = msg.get('device_name') or msg.get('target')
                 if target_name:
                     await send_to_device(instance_id, target_name, raw)
@@ -753,10 +759,14 @@ async def ws_handler(websocket):
                 if msg.get('type') == 'exec':
                     target_key = f"{instance_id}:{msg.get('device_name', '')}"
                     target = device_conns.get(target_key)
+                    known_keys = list(device_conns.keys())
+                    print(f"[{ts()}] [relay] exec → target_key={target_key!r} found={target is not None} known={known_keys}")
                     if target:
                         try:
                             await target['ws'].send(raw)
+                            print(f"[{ts()}] [relay] exec forwarded to {msg.get('device_name')}")
                         except Exception as e:
+                            print(f"[{ts()}] [relay] exec forward error: {e}")
                             # Device disconnected; notify browser
                             err = json.dumps({
                                 'type': 'result',
@@ -768,6 +778,7 @@ async def ws_handler(websocket):
                             except Exception:
                                 pass
                     else:
+                        print(f"[{ts()}] [relay] exec device not found, sending error back")
                         err = json.dumps({
                             'type': 'result',
                             'req_id': msg.get('req_id', ''),
@@ -792,6 +803,7 @@ async def ws_handler(websocket):
 
                 # Forward result to all browsers
                 if msg.get('type') == 'result':
+                    print(f"[{ts()}] [relay] result from device → browsers (req_id={msg.get('req_id','')[:12]}...)")
                     await send_to_browsers(instance_id, raw)
 
     except websockets.exceptions.ConnectionClosed:

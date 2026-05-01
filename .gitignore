@@ -30,3 +30,6 @@ drafts/
 # Local Workspaces
 prototype/workspaces/
 DEPLOY.md
+
+# Device relay runtime data
+prototype/device_relay/tokens.json

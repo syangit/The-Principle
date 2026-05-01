@@ -2,6 +2,12 @@ import asyncio, json, subprocess, base64, hashlib, os, sys, socket, re, gzip
 from datetime import datetime
 import aiohttp
 
+# Ensure stdout/stderr handle unicode on Windows (cp1252 default breaks non-ASCII)
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 INFERO_DIR = os.environ.get('INFERO_DIR', os.path.dirname(os.path.abspath(__file__)))
 INSTANCES_FILE = os.path.join(INFERO_DIR, 'instances.json')
 
@@ -22,22 +28,22 @@ def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 def get_log_file(relay_ws):
-    """Return log file path based on relay environment."""
-    if 'dev.' in relay_ws:
-        log_dir = os.path.expanduser('~/.infero-dev')
+    """Return log file path. Always logs to INFERO_DIR; stdout only on prod non-dev relays."""
+    if 'dev.' in relay_ws or 'localhost' in relay_ws or '127.0.0.1' in relay_ws or '192.168.' in relay_ws:
+        log_dir = INFERO_DIR
         os.makedirs(log_dir, exist_ok=True)
         return os.path.join(log_dir, 'agent.log')
-    return None  # prod: stdout only (captured by launchd)
+    return None  # prod: stdout only (captured by launchd/systemd)
 
 def log(relay_ws, msg):
     log_file = get_log_file(relay_ws)
     if log_file:
-        with open(log_file, 'a') as f:
+        with open(log_file, 'a', encoding='utf-8') as f:
             f.write(msg + '\n')
         if sys.stdout.isatty():
-            print(msg)  # interactive terminal only; launchd already redirects stdout to the same file
+            print(msg, file=sys.stdout)
     else:
-        print(msg)  # prod: stdout captured by launchd
+        print(msg, file=sys.stdout)
 
 def load_instances():
     try:
@@ -784,7 +790,7 @@ class GenesisWorker:
         return sysMsg
 
     async def _exec_remote_shell(self, device_name, cmd):
-        self._log(f"[{ts()}] [infero] shell exec (remote → {device_name}): {cmd[:60]}")
+        self._log(f"[{ts()}] [infero] shell exec (remote -> {device_name}): {cmd[:60]}")
         req_id = base64.urlsafe_b64encode(os.urandom(12)).decode()
         payload = encrypt(self.cipher, {'cmd': cmd})
         fut = asyncio.get_running_loop().create_future()
@@ -838,7 +844,7 @@ class GenesisWorker:
 
     def on_user_input(self, msg):
         text = msg.get('text', '')
-        self.pending_user_input = text if text else '__go__'  # empty Go → truthy sentinel
+        self.pending_user_input = text if text else '__go__'  # empty Go -> truthy sentinel
         self.trigger('')  # wake _wait_for_trigger
         self._log(f"[{ts()}] [infero] User input received: {self.pending_user_input[:40]}...")
 
@@ -878,7 +884,7 @@ async def connect_instance(cfg):
     else:
         print(f"[{ts()}] [infero] No key material for instance {cfg.get('instance_id','?')[:8]}, skipping")
         return
-    relay_http = cfg['relay_ws'].replace('wss://', 'https://').replace('ws://', 'http://').replace('/ws', '')
+    relay_http = cfg.get('relay_http') or cfg['relay_ws'].replace('wss://', 'https://').replace('ws://', 'http://').replace('/ws', '')
     await _load_bip39(relay_http)
     vwords = pair_verify_words(aes_key)
     # Write verify words to temp file so install script can display them
@@ -902,7 +908,7 @@ async def connect_instance(cfg):
                     "device_type": "shell",
                     "device_pub": device_pub_b64
                 }))
-                log(cfg['relay_ws'], f"[{ts()}] [infero] Connected: {DEVICE_NAME} → {iid}... | pair verify: {vwords}")
+                log(cfg['relay_ws'], f"[{ts()}] [infero] Connected: {DEVICE_NAME} -> {iid}... | pair verify: {vwords}")
                 async def handle_exec(req_id, payload_raw):
                     try:
                         cmd = decrypt(cipher, payload_raw)['cmd']
@@ -1025,7 +1031,7 @@ async def connect_instance(cfg):
                                     'being_id': being_id,
                                     'payload': chunk_payload
                                 }))
-                            log(cfg['relay_ws'], f"[{ts()}] [infero] consciousness_sync response sent: {len(c_text)} chars, {len(raw)}→{len(compressed)} bytes gzip, {n} chunks")
+                            log(cfg['relay_ws'], f"[{ts()}] [infero] consciousness_sync response sent: {len(c_text)} chars, {len(raw)}->{len(compressed)} bytes gzip, {n} chunks")
                         except Exception as e:
                             log(cfg['relay_ws'], f"[{ts()}] [infero] consciousness_sync error: {e}")
                     elif mtype == 'settings_update':
@@ -1055,6 +1061,27 @@ async def connect_instance(cfg):
                                     for w in workers.values():
                                         w.devices.pop(name, None)
                             log(cfg['relay_ws'], f"[{ts()}] [infero] device_status: {name} {'online' if online else 'offline'}{'(hidden)' if hidden else ''}")
+                    elif mtype == 'rekeying_request':
+                        new_browser_pub = msg.get('browser_pub', '')
+                        rekey_device_name = msg.get('device_name', '')
+                        if new_browser_pub:
+                            try:
+                                new_aes_key, new_device_pub_b64 = ecdh_derive_key(new_browser_pub)
+                                inst_list = load_instances()
+                                for inst in inst_list:
+                                    if inst['instance_id'] == cfg['instance_id']:
+                                        inst['aes_key'] = base64.b64encode(new_aes_key).decode()
+                                        inst['device_pub'] = new_device_pub_b64
+                                        inst['browser_pub'] = new_browser_pub
+                                        break
+                                save_instances(inst_list)
+                                cipher = AESGCM(new_aes_key)
+                                for w in workers.values():
+                                    w.cipher = cipher
+                                await ws.send(json.dumps({'type': 'rekeying_response', 'device_pub': new_device_pub_b64, 'device_name': rekey_device_name}))
+                                log(cfg['relay_ws'], f"[{ts()}] [infero] Re-keying complete for {iid}")
+                            except Exception as e:
+                                log(cfg['relay_ws'], f"[{ts()}] [infero] Re-keying error: {e}")
                     elif mtype == 'stream_token':
                         # Another node is streaming — decrypt and print to terminal
                         try:

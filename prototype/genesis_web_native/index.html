@@ -2046,6 +2046,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         var _pendingShellRequests = {};  // req_id -> {resolve, reject, timer, device_name}
         var _relayPingTimer = null;
         var _relayPongTimer = null;
+        var _pairModalCloseTimer = null;
 
         function initRelay() {
             const url = settings.relayHost ? `ws://${settings.relayHost}:8081` : (settings.relayUrl || SETTINGS_DEFAULTS.relayUrl);
@@ -2165,6 +2166,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         }
 
         async function startPairing() {
+            if (_pairModalCloseTimer) { clearTimeout(_pairModalCloseTimer); _pairModalCloseTimer = null; }
             const _isFirstOpen = document.getElementById('pair-modal').classList.contains('hidden');
             document.getElementById('pair-modal').classList.remove('hidden');
             document.getElementById('pair-cmd-text').textContent = 'Generating...';
@@ -2199,6 +2201,11 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 const { code } = await res.json();
                 window._pairCode = code;
                 window._pairRelayHttpUrl = relayHttpUrl;
+                const _newHost = _relayHost === 'localhost' ? undefined : _relayHost;
+                if (_newHost !== settings.relayHost) {
+                    settings.relayHost = _newHost;
+                    saveSettingsToStorage(settings);
+                }
                 selectPairOS(window._pairSelectedOS);
                 document.getElementById('pair-status').textContent = 'Click to copy. Waiting for device... (expires in 5 min)';
                 window._pendingPairKey = { privateKey: ecKeyPair.privateKey };
@@ -2209,18 +2216,12 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         }
 
         function closePairModal() {
+            if (_pairModalCloseTimer) { clearTimeout(_pairModalCloseTimer); _pairModalCloseTimer = null; }
             document.getElementById('pair-modal').classList.add('hidden');
             window._pendingPairKey = null;
             window._pairSelectedOS = null;
             window._pairCode = null;
             window._pairRelayHttpUrl = null;
-            const _newHost = (document.getElementById('pair-relay-url')?.value || '').trim() || undefined;
-            if (_newHost !== settings.relayHost) {
-                settings.relayHost = _newHost;
-                saveSettingsToStorage(settings);
-                if (_relayWs) { _relayWs.onclose = null; _relayWs.close(); _relayWs = null; _relayConnected = false; }
-                initRelay();
-            }
         }
 
         async function importDeviceKey(keyB64) {
@@ -2296,8 +2297,10 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         async function _loadBip39() {
             if (_bip39) return _bip39;
             try {
-                const relayHttp = (settings.relayUrl || SETTINGS_DEFAULTS.relayUrl)
-                    .replace('wss://', 'https://').replace('ws://', 'http://').replace(/\/ws$/, '');
+                const relayHttp = settings.relayHost
+                    ? `http://${settings.relayHost}:8080`
+                    : (settings.relayUrl || SETTINGS_DEFAULTS.relayUrl)
+                        .replace('wss://', 'https://').replace('ws://', 'http://').replace(/\/ws$/, '');
                 const res = await fetch(`${relayHttp}/bip39`);
                 if (res.ok) _bip39 = (await res.text()).trim().split(/\s+/);
             } catch (_) {}
@@ -2362,16 +2365,18 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 const { device_name, online } = msg;
                 console.log(`[relay] device_status: ${device_name} ${online?'online':'offline'}, hostDevice=${settings.hostDevice}, preferredHost=${settings.preferredHost}, wasOnline=${settings.devices?.[device_name]?.online}`);
                 if (!settings.devices) settings.devices = {};
-                if (online && msg.fresh_pair && window._pendingPairKey) {
+                if (online && msg.fresh_pair && msg.device_pub && window._pendingPairKey) {
+                    // Fresh pair: device derived its key from THIS browser_pub → ECDH keys match
                     const keyB64 = await deriveSharedKey(window._pendingPairKey.privateKey, msg.device_pub);
                     settings.devices[device_name] = { keyB64, online: true, type: msg.device_type || 'shell' };
                     window._pendingPairKey = null;
+                    saveSettingsToStorage(settings);
                     const vwords = await pairVerifyWords(keyB64);
                     const statusEl = document.getElementById('pair-status');
                     statusEl.textContent = `✓ ${device_name} connected!`;
                     statusEl.style.cssText = 'color:#fff;font-weight:500;font-size:0.82rem;';
                     appendMsgUI('system', `🔐 E2E encrypted · AES-256-GCM via ECDH/P-256  \nDevice: ${device_name} · Verify Words: **${vwords}**  \nIf your device shows the same words, the channel is clean. The relay is blind. Trust the math.`);
-                    setTimeout(closePairModal, 2000);
+                    _pairModalCloseTimer = setTimeout(() => { _pairModalCloseTimer = null; closePairModal(); }, 2000);
                 } else if (settings.devices[device_name]) {
                     const wasOnline = settings.devices[device_name].online;
                     settings.devices[device_name].online = online;
@@ -2382,6 +2387,15 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                         saveSettingsToStorage(settings);
                         renderDeviceList();
                         return;
+                    }
+                } else {
+                    // Online but unknown device (not in settings.devices, not a fresh pair with key available).
+                    // Track it so the device list can show a "Pair" button.
+                    if (!window._unregisteredDevices) window._unregisteredDevices = {};
+                    if (online) {
+                        window._unregisteredDevices[device_name] = { type: msg.device_type || 'shell' };
+                    } else {
+                        delete window._unregisteredDevices[device_name];
                     }
                 }
                 saveSettingsToStorage(settings);
@@ -2434,6 +2448,27 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                     }
                 }
                 console.log(`[relay] device_status END: preferred=${settings.preferredHost} host=${settings.hostDevice} online=${online}`);
+            }
+            if (msg.type === 'rekeying_response') {
+                const { device_pub } = msg;
+                const device_name = msg.device_name || Object.keys(window._rekeyingDevices || {})[0];
+                const rekeyState = window._rekeyingDevices?.[device_name];
+                if (!rekeyState || !device_pub) return;
+                try {
+                    const keyB64 = await deriveSharedKey(rekeyState.privateKey, device_pub);
+                    if (!settings.devices) settings.devices = {};
+                    const devType = window._unregisteredDevices?.[device_name]?.type || 'shell';
+                    settings.devices[device_name] = { keyB64, online: true, type: devType };
+                    saveSettingsToStorage(settings);
+                    delete window._rekeyingDevices[device_name];
+                    if (window._unregisteredDevices) delete window._unregisteredDevices[device_name];
+                    renderDeviceList();
+                    const vwords = await pairVerifyWords(keyB64);
+                    appendMsgUI('system', `🔐 Re-paired: ${device_name} · Verify Words: **${vwords}**`);
+                } catch (e) {
+                    appendMsgUI('system', `⚠ Re-key failed for ${device_name}: ${e.message}`);
+                }
+                return;
             }
             if (msg.type === 'device_removed') {
                 const { device_name } = msg;
@@ -2745,7 +2780,24 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                     <span style="color:var(--text-dim);font-size:0.6rem;margin-right:2px">${d.online ? 'online' : 'offline'}</span>
                     ${hostIcon}${controls}
                 </div>`;
-            }).join('');
+            }).join('') + Object.keys(window._unregisteredDevices || {}).map(name =>
+                `<div style="display:flex;align-items:center;gap:4px;font-size:0.62rem;padding:2px 4px;font-family:'JetBrains Mono',monospace">
+                    <span style="width:7px;height:7px;border-radius:50%;margin-right:5px;flex-shrink:0;background:#e67e22;box-shadow:0 0 4px #e67e2288"></span>
+                    <span style="color:var(--text-dim);flex:1">${name}</span>
+                    <button onclick="startRekey('${name}')" style="background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);padding:1px 6px;font-family:'JetBrains Mono',monospace;font-size:0.58rem;border-radius:3px;cursor:pointer">Pair</button>
+                </div>`
+            ).join('');
+        }
+
+        async function startRekey(device_name) {
+            if (!_relayWs || !_relayConnected) { appendMsgUI('system', '⚠ Relay not connected'); return; }
+            if (!window._rekeyingDevices) window._rekeyingDevices = {};
+            const ecKeyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+            const pubRaw = await crypto.subtle.exportKey('raw', ecKeyPair.publicKey);
+            const browserPubB64 = btoa(String.fromCharCode(...new Uint8Array(pubRaw)));
+            window._rekeyingDevices[device_name] = { privateKey: ecKeyPair.privateKey };
+            _relayWs.send(JSON.stringify({ type: 'rekeying_request', device_name, browser_pub: browserPubB64 }));
+            appendMsgUI('system', `Sending re-key request to ${device_name}...`);
         }
 
         function setPreferredHost(name) {
