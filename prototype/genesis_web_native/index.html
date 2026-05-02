@@ -2192,6 +2192,12 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 );
                 const pubRaw = await crypto.subtle.exportKey('raw', ecKeyPair.publicKey);
                 const browserPubB64 = btoa(String.fromCharCode(...new Uint8Array(pubRaw)));
+                // Save private key to sessionStorage BEFORE the network request so it
+                // survives a browser reload triggered during the fetch or device connection
+                try {
+                    const jwk = await crypto.subtle.exportKey('jwk', ecKeyPair.privateKey);
+                    sessionStorage.setItem('_pairPendingJwk', JSON.stringify(jwk));
+                } catch (_) {}
                 const res = await fetch(`${relayHttpUrl}/pair/create`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2219,6 +2225,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             if (_pairModalCloseTimer) { clearTimeout(_pairModalCloseTimer); _pairModalCloseTimer = null; }
             document.getElementById('pair-modal').classList.add('hidden');
             window._pendingPairKey = null;
+            sessionStorage.removeItem('_pairPendingJwk');
             window._pairSelectedOS = null;
             window._pairCode = null;
             window._pairRelayHttpUrl = null;
@@ -2307,6 +2314,16 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             return _bip39;
         }
 
+        function agentLogHint(device_name) {
+            const os = settings.devices?.[device_name]?.os || '';
+            const logPath = os === 'Windows'
+                ? '%APPDATA%\\infero\\agent.log'
+                : os === 'macOS' ? '~/.infero/agent.log'
+                : os === 'Linux' ? '~/.infero/agent.log'
+                : '~/.infero/agent.log  (or %APPDATA%\\infero\\agent.log on Windows)';
+            return `Check shell output or \`${logPath}\` on the device — verify words must match.`;
+        }
+
         async function pairVerifyWords(keyB64) {
             const words = await _loadBip39();
             if (!words || words.length < 2048) return '(wordlist unavailable)';
@@ -2368,14 +2385,15 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 if (online && msg.fresh_pair && msg.device_pub && window._pendingPairKey) {
                     // Fresh pair: device derived its key from THIS browser_pub → ECDH keys match
                     const keyB64 = await deriveSharedKey(window._pendingPairKey.privateKey, msg.device_pub);
-                    settings.devices[device_name] = { keyB64, online: true, type: msg.device_type || 'shell' };
+                    settings.devices[device_name] = { keyB64, online: true, type: msg.device_type || 'shell', os: msg.device_os || '' };
                     window._pendingPairKey = null;
+                    sessionStorage.removeItem('_pairPendingJwk');
                     saveSettingsToStorage(settings);
                     const vwords = await pairVerifyWords(keyB64);
                     const statusEl = document.getElementById('pair-status');
                     statusEl.textContent = `✓ ${device_name} connected!`;
                     statusEl.style.cssText = 'color:#fff;font-weight:500;font-size:0.82rem;';
-                    appendMsgUI('system', `🔐 E2E encrypted · AES-256-GCM via ECDH/P-256  \nDevice: ${device_name} · Verify Words: **${vwords}**  \nIf your device shows the same words, the channel is clean. The relay is blind. Trust the math.`);
+                    appendMsgUI('system', `🔐 E2E encrypted · AES-256-GCM via ECDH/P-256  \nDevice: ${device_name} · Verify Words: **${vwords}**  \n${agentLogHint(device_name)}`);
                     _pairModalCloseTimer = setTimeout(() => { _pairModalCloseTimer = null; closePairModal(); }, 2000);
                 } else if (settings.devices[device_name]) {
                     const wasOnline = settings.devices[device_name].online;
@@ -2388,15 +2406,41 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                         renderDeviceList();
                         return;
                     }
+                    if (msg.device_os) settings.devices[device_name].os = msg.device_os;
+                    if (!wasOnline && online && settings.devices[device_name].keyB64) {
+                        const vwords = await pairVerifyWords(settings.devices[device_name].keyB64);
+                        appendMsgUI('system', `🔐 ${device_name} · Verify Words: **${vwords}**  \n${agentLogHint(device_name)}`);
+                    }
                 } else {
-                    // Online but unknown device (not in settings.devices, not a fresh pair with key available).
-                    // Track it so the device list can show a "Pair" button.
+                    // Online but unknown device — try to recover from sessionStorage first
                     if (!window._unregisteredDevices) window._unregisteredDevices = {};
                     if (online) {
-                        window._unregisteredDevices[device_name] = { type: msg.device_type || 'shell' };
-                        if (msg.fresh_pair) {
-                            // Device ran the install script but the pair modal was closed before it connected
-                            appendMsgUI('system', `System - [Device] - ${device_name} pairing incomplete — device connected after the pair modal closed, so its initial key was not captured. Click **Pair** in Settings to complete pairing.`);
+                        const _savedJwk = sessionStorage.getItem('_pairPendingJwk');
+                        if (msg.device_pub && _savedJwk) {
+                            // Browser reloaded during pairing — recover K1 using persisted private key
+                            try {
+                                const _savedPriv = await crypto.subtle.importKey(
+                                    'jwk', JSON.parse(_savedJwk),
+                                    { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']
+                                );
+                                const keyB64 = await deriveSharedKey(_savedPriv, msg.device_pub);
+                                settings.devices[device_name] = { keyB64, online: true, type: msg.device_type || 'shell', os: msg.device_os || '' };
+                                saveSettingsToStorage(settings);
+                                sessionStorage.removeItem('_pairPendingJwk');
+                                renderDeviceList();
+                                const vwords = await pairVerifyWords(keyB64);
+                                appendMsgUI('system', `🔐 Pairing complete: ${device_name} · Verify Words: **${vwords}**  \n${agentLogHint(device_name)}`);
+                            } catch (_e) {
+                                window._unregisteredDevices[device_name] = { type: msg.device_type || 'shell', os: msg.device_os || '' };
+                                if (msg.fresh_pair) {
+                                    appendMsgUI('system', `System - [Device] - ${device_name} pairing incomplete — device connected after the pair modal closed, so its initial key was not captured. Click **Pair** in Settings to complete pairing.`);
+                                }
+                            }
+                        } else {
+                            window._unregisteredDevices[device_name] = { type: msg.device_type || 'shell', os: msg.device_os || '' };
+                            if (msg.fresh_pair) {
+                                appendMsgUI('system', `System - [Device] - ${device_name} pairing incomplete — device connected after the pair modal closed, so its initial key was not captured. Click **Pair** in Settings to complete pairing.`);
+                            }
                         }
                     } else {
                         delete window._unregisteredDevices[device_name];
@@ -2465,13 +2509,14 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                     const keyB64 = await deriveSharedKey(rekeyState.privateKey, device_pub);
                     if (!settings.devices) settings.devices = {};
                     const devType = window._unregisteredDevices?.[device_name]?.type || 'shell';
-                    settings.devices[device_name] = { keyB64, online: true, type: devType };
+                    const devOs = window._unregisteredDevices?.[device_name]?.os || '';
+                    settings.devices[device_name] = { keyB64, online: true, type: devType, os: devOs };
                     saveSettingsToStorage(settings);
                     delete window._rekeyingDevices[device_name];
                     if (window._unregisteredDevices) delete window._unregisteredDevices[device_name];
                     renderDeviceList();
                     const vwords = await pairVerifyWords(keyB64);
-                    appendMsgUI('system', `🔐 Pairing complete: ${device_name} · Verify Words: **${vwords}** — compare with device log to confirm the channel.`);
+                    appendMsgUI('system', `🔐 Pairing complete: ${device_name} · Verify Words: **${vwords}**  \n${agentLogHint(device_name)}`);
                 } catch (e) {
                     appendMsgUI('system', `⚠ Re-key failed for ${device_name}: ${e.message}`);
                 }

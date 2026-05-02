@@ -28,12 +28,12 @@ def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 def get_log_file(relay_ws):
-    """Return log file path. Always logs to INFERO_DIR; stdout only on prod non-dev relays."""
-    if 'dev.' in relay_ws or 'localhost' in relay_ws or '127.0.0.1' in relay_ws or '192.168.' in relay_ws:
+    """Return log file path. Windows always logs to file (no visible console). macOS/Linux: file for dev, stdout for prod."""
+    if sys.platform == 'win32' or 'dev.' in relay_ws or 'localhost' in relay_ws or '127.0.0.1' in relay_ws or '192.168.' in relay_ws:
         log_dir = INFERO_DIR
         os.makedirs(log_dir, exist_ok=True)
         return os.path.join(log_dir, 'agent.log')
-    return None  # prod: stdout only (captured by launchd/systemd)
+    return None  # prod macOS/Linux: stdout only (captured by launchd/systemd)
 
 def log(relay_ws, msg):
     log_file = get_log_file(relay_ws)
@@ -890,12 +890,6 @@ async def connect_instance(cfg):
     relay_http = cfg.get('relay_http') or cfg['relay_ws'].replace('wss://', 'https://').replace('ws://', 'http://').replace('/ws', '')
     await _load_bip39(relay_http)
     vwords = pair_verify_words(aes_key)
-    # Write verify words to temp file so install script can display them
-    try:
-        with open(os.path.join(INFERO_DIR, f'verify_{cfg["instance_id"]}.tmp'), 'w') as _vf:
-            _vf.write(vwords)
-    except Exception:
-        pass
     cipher = AESGCM(aes_key)
     backoff = 1
     iid = cfg['instance_id'][:8]
@@ -903,16 +897,19 @@ async def connect_instance(cfg):
         try:
             async with websockets.connect(cfg['relay_ws']) as ws:
                 backoff = 1
+                _device_os = 'Windows' if sys.platform == 'win32' else 'macOS' if sys.platform == 'darwin' else 'Linux'
                 await ws.send(json.dumps({
                     "type": "device_hello",
                     "instance_id": cfg['instance_id'],
                     "token": cfg['token'],
                     "device_name": DEVICE_NAME,
                     "device_type": "shell",
-                    "device_pub": device_pub_b64
+                    "device_pub": device_pub_b64,
+                    "device_os": _device_os
                 }))
                 _key_label = 'key:saved' if _key_source == 'saved' else 'key:new (awaiting browser pairing)' if _key_source == 'fresh' else 'key:legacy'
                 log(cfg['relay_ws'], f"[{ts()}] [infero] Connected: {DEVICE_NAME} -> {iid}... | {_key_label} | verify: {vwords}")
+                print(f"[infero] verify: {vwords}", flush=True)
                 async def handle_exec(req_id, payload_raw):
                     try:
                         cmd = decrypt(cipher, payload_raw)['cmd']
@@ -1085,6 +1082,7 @@ async def connect_instance(cfg):
                                 await ws.send(json.dumps({'type': 'rekeying_response', 'device_pub': new_device_pub_b64, 'device_name': rekey_device_name}))
                                 new_vwords = pair_verify_words(new_aes_key)
                                 log(cfg['relay_ws'], f"[{ts()}] [infero] Re-keying complete for {iid} | key:re-keyed | verify: {new_vwords}")
+                                print(f"[infero] re-keyed | verify: {new_vwords}", flush=True)
                             except Exception as e:
                                 log(cfg['relay_ws'], f"[{ts()}] [infero] Re-keying error: {e}")
                     elif mtype == 'stream_token':

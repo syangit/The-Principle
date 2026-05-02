@@ -353,21 +353,6 @@ ENDOFSERVICE
     echo "[infero] Auto-start registered (systemd)"
 fi
 
-# ── Wait for verify words from agent ────────────────────────────────────────
-VFILE="$INFERO_DIR/verify_{INSTANCE_ID}.tmp"
-rm -f "$VFILE"
-echo ""
-echo "[infero] Connecting to relay..."
-VWORDS=""
-for i in $(seq 1 20); do
-    sleep 1
-    if [ -f "$VFILE" ]; then
-        VWORDS=$(cat "$VFILE")
-        rm -f "$VFILE"
-        break
-    fi
-done
-
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " ✓ Pairing request sent"
@@ -465,18 +450,16 @@ $Settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999
 Register-ScheduledTask -TaskName "InferoDevice" -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
 Write-Host "[infero] Auto-start registered (Task Scheduler)"
 
-$VFILE = "$INFERO_DIR\verify_${INSTANCE_ID}.tmp"
-Remove-Item $VFILE -ErrorAction SilentlyContinue
+$LOGFILE = "$INFERO_DIR\agent.log"
 Write-Host ""
 Write-Host "[infero] Connecting to relay..."
 Start-Process -WindowStyle Hidden -FilePath "$VENV_DIR\Scripts\python.exe" -ArgumentList "-u `"$AGENT`""
 $VWORDS = ""
-for ($i = 0; $i -lt 20; $i++) {
+for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
-    if (Test-Path $VFILE) {
-        $VWORDS = Get-Content $VFILE -Raw
-        Remove-Item $VFILE -ErrorAction SilentlyContinue
-        break
+    if (Test-Path $LOGFILE) {
+        $match = Select-String -Path $LOGFILE -Pattern '\| verify: ' -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($match) { $VWORDS = ($match.Line -replace '.*\| verify: ', '').Trim(); break }
     }
 }
 
@@ -626,7 +609,8 @@ async def ws_handler(websocket):
                             'device_type': info.get('device_type', 'shell'),
                             'online': True,
                             'fresh_pair': False,
-                            'device_pub': info.get('device_pub', '')
+                            'device_pub': info.get('device_pub', ''),
+                            'device_os': info.get('device_os', '')
                         }))
                     except Exception:
                         pass
@@ -651,7 +635,8 @@ async def ws_handler(websocket):
                 'device_name': device_name,
                 'device_type': device_type,
                 'token': token,
-                'device_pub': msg.get('device_pub', '')
+                'device_pub': msg.get('device_pub', ''),
+                'device_os': msg.get('device_os', '')
             }
             role = 'device'
             print(f"[{ts()}] [relay] Device connected: {device_name} (instance {instance_id[:12]}...)")
@@ -663,7 +648,8 @@ async def ws_handler(websocket):
                 'device_type': device_type,
                 'online': True,
                 'fresh_pair': fresh_pair,
-                'device_pub': msg.get('device_pub', '')
+                'device_pub': msg.get('device_pub', ''),
+                'device_os': msg.get('device_os', '')
             }), exclude_ws=websocket)
         else:
             await websocket.close(4000, 'Unknown handshake type')
