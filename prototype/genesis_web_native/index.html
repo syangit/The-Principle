@@ -2047,6 +2047,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         var _relayPingTimer = null;
         var _relayPongTimer = null;
         var _pairModalCloseTimer = null;
+        var _pairCountdownInterval = null;
 
         function initRelay() {
             const url = settings.relayHost ? `ws://${settings.relayHost}:8081` : (settings.relayUrl || SETTINGS_DEFAULTS.relayUrl);
@@ -2167,6 +2168,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
 
         async function startPairing() {
             if (_pairModalCloseTimer) { clearTimeout(_pairModalCloseTimer); _pairModalCloseTimer = null; }
+            if (_pairCountdownInterval) { clearInterval(_pairCountdownInterval); _pairCountdownInterval = null; }
             const _isFirstOpen = document.getElementById('pair-modal').classList.contains('hidden');
             document.getElementById('pair-modal').classList.remove('hidden');
             document.getElementById('pair-cmd-text').textContent = 'Generating...';
@@ -2213,7 +2215,19 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                     saveSettingsToStorage(settings);
                 }
                 selectPairOS(window._pairSelectedOS);
-                document.getElementById('pair-status').textContent = 'Click to copy. Waiting for device... (expires in 5 min)';
+                const _pairExpireAt = Date.now() + 300000;
+                const _updateCountdown = () => {
+                    const secsLeft = Math.max(0, Math.round((_pairExpireAt - Date.now()) / 1000));
+                    const mm = String(Math.floor(secsLeft / 60)).padStart(2, '0');
+                    const ss = String(secsLeft % 60).padStart(2, '0');
+                    const statusEl = document.getElementById('pair-status');
+                    if (statusEl && !statusEl.textContent.startsWith('✓')) {
+                        statusEl.textContent = `Click to copy. Waiting for device... (expires in ${mm}:${ss})`;
+                    }
+                    if (secsLeft === 0) { clearInterval(_pairCountdownInterval); _pairCountdownInterval = null; }
+                };
+                _updateCountdown();
+                _pairCountdownInterval = setInterval(_updateCountdown, 1000);
                 window._pendingPairKey = { privateKey: ecKeyPair.privateKey };
             } catch (e) {
                 document.getElementById('pair-cmd-text').textContent = '';
@@ -2223,6 +2237,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
 
         function closePairModal() {
             if (_pairModalCloseTimer) { clearTimeout(_pairModalCloseTimer); _pairModalCloseTimer = null; }
+            if (_pairCountdownInterval) { clearInterval(_pairCountdownInterval); _pairCountdownInterval = null; }
             document.getElementById('pair-modal').classList.add('hidden');
             window._pendingPairKey = null;
             sessionStorage.removeItem('_pairPendingJwk');
@@ -2390,6 +2405,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                     sessionStorage.removeItem('_pairPendingJwk');
                     saveSettingsToStorage(settings);
                     const vwords = await pairVerifyWords(keyB64);
+                    if (_pairCountdownInterval) { clearInterval(_pairCountdownInterval); _pairCountdownInterval = null; }
                     const statusEl = document.getElementById('pair-status');
                     statusEl.textContent = `✓ ${device_name} connected!`;
                     statusEl.style.cssText = 'color:#fff;font-weight:500;font-size:0.82rem;';
