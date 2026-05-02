@@ -2394,6 +2394,10 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                     if (!window._unregisteredDevices) window._unregisteredDevices = {};
                     if (online) {
                         window._unregisteredDevices[device_name] = { type: msg.device_type || 'shell' };
+                        if (msg.fresh_pair) {
+                            // Device ran the install script but the pair modal was closed before it connected
+                            appendMsgUI('system', `System - [Device] - ${device_name} pairing failed — the pair modal was not open. Open Settings → Add Device and click **Pair** to retry.`);
+                        }
                     } else {
                         delete window._unregisteredDevices[device_name];
                     }
@@ -2403,6 +2407,9 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 if (settings.devices[device_name]?.hidden) return;  // hidden device — no UI/consciousness noise
                 const note = `System - [Device] - ${device_name} is now ${online ? 'online' : 'offline'}`;
                 appendMsgUI('system', note);
+                if (online && window._unregisteredDevices?.[device_name] && !msg.fresh_pair) {
+                    appendMsgUI('system', `[Device] - ${device_name} is not paired with this browser. Open Settings → click **Pair** next to it to establish an encrypted channel.`);
+                }
                 // Don't write device status to consciousness — reconnection noise pollutes AI context
                 // Auto takeover if core loop host went offline
                 if (!online && settings.hostDevice === device_name) {
