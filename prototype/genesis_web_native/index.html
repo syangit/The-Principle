@@ -2396,7 +2396,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                         window._unregisteredDevices[device_name] = { type: msg.device_type || 'shell' };
                         if (msg.fresh_pair) {
                             // Device ran the install script but the pair modal was closed before it connected
-                            appendMsgUI('system', `System - [Device] - ${device_name} pairing failed — the pair modal was not open. Open Settings → Add Device and click **Pair** to retry.`);
+                            appendMsgUI('system', `System - [Device] - ${device_name} pairing incomplete — device connected after the pair modal closed, so its initial key was not captured. Click **Pair** in Settings to complete pairing.`);
                         }
                     } else {
                         delete window._unregisteredDevices[device_name];
@@ -2471,7 +2471,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                     if (window._unregisteredDevices) delete window._unregisteredDevices[device_name];
                     renderDeviceList();
                     const vwords = await pairVerifyWords(keyB64);
-                    appendMsgUI('system', `🔐 Re-paired: ${device_name} · Verify Words: **${vwords}**`);
+                    appendMsgUI('system', `🔐 Pairing complete: ${device_name} · Verify Words: **${vwords}** — compare with device log to confirm the channel.`);
                 } catch (e) {
                     appendMsgUI('system', `⚠ Re-key failed for ${device_name}: ${e.message}`);
                 }

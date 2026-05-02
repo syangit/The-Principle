@@ -868,6 +868,7 @@ async def connect_instance(cfg):
     if cfg.get('aes_key'):
         aes_key = base64.b64decode(cfg['aes_key'])
         device_pub_b64 = cfg.get('device_pub', '')
+        _key_source = 'saved'
     elif cfg.get('browser_pub'):
         aes_key, device_pub_b64 = ecdh_derive_key(cfg['browser_pub'])
         instances = load_instances()
@@ -877,10 +878,12 @@ async def connect_instance(cfg):
                 inst['device_pub'] = device_pub_b64
                 break
         save_instances(instances)
+        _key_source = 'fresh'
     elif cfg.get('key'):
         # Legacy format: relay-distributed symmetric key (pre-ECDH)
         aes_key = base64.urlsafe_b64decode(cfg['key'] + '=' * (4 - len(cfg['key']) % 4))
         device_pub_b64 = ''
+        _key_source = 'legacy'
     else:
         print(f"[{ts()}] [infero] No key material for instance {cfg.get('instance_id','?')[:8]}, skipping")
         return
@@ -908,7 +911,8 @@ async def connect_instance(cfg):
                     "device_type": "shell",
                     "device_pub": device_pub_b64
                 }))
-                log(cfg['relay_ws'], f"[{ts()}] [infero] Connected: {DEVICE_NAME} -> {iid}... | pair verify: {vwords}")
+                _key_label = 'key:saved' if _key_source == 'saved' else 'key:new (awaiting browser pairing)' if _key_source == 'fresh' else 'key:legacy'
+                log(cfg['relay_ws'], f"[{ts()}] [infero] Connected: {DEVICE_NAME} -> {iid}... | {_key_label} | verify: {vwords}")
                 async def handle_exec(req_id, payload_raw):
                     try:
                         cmd = decrypt(cipher, payload_raw)['cmd']
@@ -1079,7 +1083,8 @@ async def connect_instance(cfg):
                                 for w in workers.values():
                                     w.cipher = cipher
                                 await ws.send(json.dumps({'type': 'rekeying_response', 'device_pub': new_device_pub_b64, 'device_name': rekey_device_name}))
-                                log(cfg['relay_ws'], f"[{ts()}] [infero] Re-keying complete for {iid}")
+                                new_vwords = pair_verify_words(new_aes_key)
+                                log(cfg['relay_ws'], f"[{ts()}] [infero] Re-keying complete for {iid} | key:re-keyed | verify: {new_vwords}")
                             except Exception as e:
                                 log(cfg['relay_ws'], f"[{ts()}] [infero] Re-keying error: {e}")
                     elif mtype == 'stream_token':
