@@ -3108,7 +3108,8 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             try {
                 const isLocal = !location.host || location.host.startsWith('localhost') || location.host.startsWith('127.0.0.1');
                 const modelsUrl = isLocal ? './models.json' : location.origin + '/genesis/models.json';
-                const res = await fetch(modelsUrl);
+                let res = await fetch(modelsUrl).catch(() => null);
+                if (!res?.ok) res = await fetch('https://infero.net/genesis/models.json');
                 const data = await res.json();
                 const select = document.getElementById('set-model');
                 // Load providers
