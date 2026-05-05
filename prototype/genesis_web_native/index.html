@@ -2183,7 +2183,9 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             if (_isFirstOpen) document.getElementById('pair-relay-url').value = settings.relayHost || '';
             try {
                 const _relayHost = document.getElementById('pair-relay-url').value.trim() || 'localhost';
-                const relayHttpUrl = `http://${_relayHost}:8080`;
+                const relayHttpUrl = _isLocalHost
+                    ? `http://${_relayHost}:8080`
+                    : `${location.origin}/device-relay`;
                 const relayWsUrl = `ws://${_relayHost}:8081`;
                 const bName = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' :
                     /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' :
