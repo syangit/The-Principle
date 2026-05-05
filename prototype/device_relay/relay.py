@@ -100,7 +100,7 @@ BROWSER_PUB="{BROWSER_PUB}"
 CLIENT_NAME="{CLIENT_NAME}"
 
 # Auto-detect dev vs prod based on relay URL
-if echo "$RELAY_WS" | grep -q "dev\."; then
+if echo "$RELAY_WS" | grep -qE "dev[0-9]*\."; then
     INFERO_DIR="$HOME/.infero-dev"
     INFERO_CMD="infero-dev"
 else
@@ -573,8 +573,8 @@ async def handle_pair_get_ps1(request):
     req_host = request.host.split(':')[0]  # IP or hostname without port
     http_port = int(os.environ.get('HTTP_PORT', 8080))
     ws_port = int(os.environ.get('WS_PORT', 8081))
-    relay_http = os.environ.get('RELAY_HTTP_URL', f'http://{req_host}:{http_port}')
     relay_ws = os.environ.get('RELAY_WS_URL', f'ws://{req_host}:{ws_port}')
+    relay_http = os.environ.get('RELAY_HTTP_URL') or relay_ws.replace('wss://', 'https://').replace('ws://', 'http://').replace('/ws', '')
     script = build_script_ps1(relay_ws, instance_id, token, browser_pub, client_name, relay_http)
     return web.Response(text=script, content_type='text/plain',
                         headers={'Content-Disposition': 'inline; filename="infero_connect.ps1"',
