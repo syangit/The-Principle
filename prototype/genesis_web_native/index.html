@@ -3760,8 +3760,28 @@ Renders the verdict as a floating overlay.`,
             await loadModels();
             const params = new URLSearchParams(location.search);
             const skillsParam = params.get('skills');
+            const newFlag = params.has('new');
             const hubInstallNames = skillsParam ? skillsParam.split(',').map(s => s.trim()).filter(Boolean) : [];
-            if (hubInstallNames.length) {
+            if (newFlag && !hubInstallNames.length) {
+                try { await newBeing(); }
+                catch (e) { console.error('[boot] newBeing failed', e); }
+                try {
+                    if (currentBeingId) {
+                        await seedDefaultSkills(currentBeingId);
+                        const skills = await DB.listSkills(currentBeingId);
+                        for (const s of skills) {
+                            if (!s || s.enable !== true) continue;
+                            const js = skillJsCode(s.code);
+                            if (!js) continue;
+                            try { (0, eval)(js); console.log("[skill] code reloaded:", s.name); }
+                            catch (e) { console.error("[skill] code eval failed:", s.name, e); }
+                        }
+                    }
+                } catch (e) { console.error("[boot] skill init failed", e); }
+                const url = new URL(location.href);
+                url.searchParams.delete('new');
+                history.replaceState(null, '', url.toString());
+            } else if (hubInstallNames.length) {
                 // Hub-experience path: never load the existing Being. Go straight to a fresh one
                 // so its skills (including any cached `code`) eval against the new context, not
                 // a stale one. newBeing() seeds defaults and evals cached code internally.
