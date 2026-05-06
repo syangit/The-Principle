@@ -462,14 +462,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def skill_to_dict(row, include_code=True):
+NOTE_PREVIEW_CHARS = 600
+
+def skill_to_dict(row, include_code=True, summary=False):
+    note_full = (row["note"] if "note" in row.keys() else None) or ""
+    if summary and len(note_full) > NOTE_PREVIEW_CHARS:
+        note_out = note_full[:NOTE_PREVIEW_CHARS]
+        note_truncated = True
+    else:
+        note_out = note_full
+        note_truncated = False
     d = {
         "name": row["name"],
         "author_hash_short": row["author_hash"][:8],
         "being_name": (row["being_name"] if "being_name" in row.keys() else None) or "",
         "companion_name": (row["companion_name"] if "companion_name" in row.keys() else None) or "",
         "contact": (row["contact"] if "contact" in row.keys() else None) or "",
-        "note": (row["note"] if "note" in row.keys() else None) or "",
+        "note": note_out,
         "instruction": row["instruction"],
         "code_readme": row["code_readme"],
         "tags": json.loads(row["tags"] or "[]"),
@@ -479,6 +488,9 @@ def skill_to_dict(row, include_code=True):
         "review": row["review"],
         "installs": row["installs"],
     }
+    if note_truncated:
+        d["note_truncated"] = True
+        d["note_full_chars"] = len(note_full)
     if include_code:
         raw = row["code"] or ""
         parsed = None
@@ -504,34 +516,42 @@ async def hub_list(sort: str = "hot", q: Optional[str] = None, limit: int = 5, o
     now = int(time.time())
     with db() as c:
         rows = c.execute("SELECT * FROM skills WHERE status='approved'").fetchall()
-    items = [skill_to_dict(r, include_code=True) for r in rows]
-    rows_with = list(zip(items, rows))
     if q:
-        def blob(i):
-            return (i["name"] + " " + " ".join(i["tags"]) + " " + (i["instruction"] or "") + " " + (i.get("being_name") or "") + " " + (i.get("companion_name") or "") + " " + (i.get("contact") or "") + " " + (i.get("note") or "")).lower()
+        def blob_row(r):
+            tags_str = r["tags"] or ""
+            parts = [
+                r["name"] or "",
+                tags_str,
+                r["instruction"] or "",
+                (r["being_name"] if "being_name" in r.keys() else None) or "",
+                (r["companion_name"] if "companion_name" in r.keys() else None) or "",
+                (r["contact"] if "contact" in r.keys() else None) or "",
+                (r["note"] if "note" in r.keys() else None) or "",
+            ]
+            return " ".join(parts).lower()
         q_low = q.lower().strip()
-        full = [(i, r) for (i, r) in rows_with if q_low in blob(i)]
+        full = [r for r in rows if q_low in blob_row(r)]
         if full:
-            rows_with = full
+            rows = full
         else:
             words = [w for w in q_low.split() if w]
             if words:
-                rows_with = [(i, r) for (i, r) in rows_with if any(w in blob(i) for w in words)]
+                rows = [r for r in rows if any(w in blob_row(r) for w in words)]
             else:
-                rows_with = full
+                rows = full
     if sort == "new":
-        rows_with.sort(key=lambda ir: -ir[1]["created_at"])
+        rows.sort(key=lambda r: -r["created_at"])
     else:
-        rows_with.sort(key=lambda ir: -hn_rank(ir[1]["score"], ir[1]["installs"], ir[1]["created_at"], now))
-    total = len(rows_with)
-    page = rows_with[offset:offset + limit]
+        rows.sort(key=lambda r: -hn_rank(r["score"], r["installs"], r["created_at"], now))
+    total = len(rows)
+    page = rows[offset:offset + limit]
     return {
         "version": 1,
         "updated": now,
         "total": total,
         "limit": limit,
         "offset": offset,
-        "skills": [i for i, _ in page],
+        "skills": [skill_to_dict(r, include_code=False, summary=True) for r in page],
     }
 
 @app.get("/hub/skill/{name}")
