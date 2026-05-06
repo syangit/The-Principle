@@ -37,7 +37,7 @@ Genesis (Infero) v0.1 — a local-first digital life engine. Split-screen web ap
 | Prod | `infero.net/genesis` | `main` | `:8080` | `:8082/:8083` |
 | Dev | `dev.infero.net/genesis` | `dev` | `:8084` | `:8087/:8088` |
 
-Server: `ubuntu@54.168.240.219`, key: `~/.ssh/ec2_tokyo_2023.pem`
+Server: `ubuntu@3.114.3.152` (infero.net, hosts both prod and dev), key: `~/.ssh/ec2_tokyo_2023.pem`
 
 ## Deployment
 
@@ -59,3 +59,4 @@ Also works from GitHub Pages, Vercel, or local `file://` (no device relay needed
 - Context compression triggers at 300k tokens, saves trimmed middle to IndexedDB.
 - Anthropic cache uses up to 4 floor-aligned breakpoints in the user content array (stable cache positions).
 - `agent.py` is loaded once at relay startup — changes require relay restart to take effect.
+- **`index.html` must contain no Chinese text.** All UI strings, comments, default-skill instructions, and any inline prose must be English. Translations live in `i18n.json`.

@@ -278,6 +278,27 @@ class GenesisWorker:
             cm_path = os.path.join(INFERO_DIR, 'beings', self.being_id, 'core_mem.md')
             os.makedirs(os.path.dirname(cm_path), exist_ok=True)
             with open(cm_path, 'w', encoding='utf-8') as f: f.write(core_mem)
+        # Sync skills: browser's {beingId}/skill/* → {INFERO_DIR}/beings/{beingId}/skill/{name}.json
+        skills = data.get('skills') or []
+        if self.being_id and skills:
+            skill_dir = os.path.join(INFERO_DIR, 'beings', self.being_id, 'skill')
+            os.makedirs(skill_dir, exist_ok=True)
+            for s in skills:
+                name = s.get('name') or (s.get('value') or {}).get('id')
+                if not name: continue
+                with open(os.path.join(skill_dir, name + '.json'), 'w', encoding='utf-8') as f:
+                    json.dump(s.get('value') or {}, f, ensure_ascii=False)
+            self._log(f"[{ts()}] [infero] synced {len(skills)} skills to {skill_dir}")
+            self._init_skill_code()
+        # Sync identity (mnemonic etc.) — write only if not already present locally
+        identity = data.get('identity')
+        if self.being_id and identity:
+            id_path = os.path.join(INFERO_DIR, 'beings', self.being_id, 'identity.json')
+            os.makedirs(os.path.dirname(id_path), exist_ok=True)
+            if not os.path.exists(id_path):
+                with open(id_path, 'w', encoding='utf-8') as f:
+                    json.dump(identity, f, ensure_ascii=False)
+                self._log(f"[{ts()}] [infero] identity synced to {id_path}")
         self.llm_settings = data.get('settings', {})
         self.devices = data.get('devices', {})
         self.hidden_devices = set(data.get('hiddenDevices', []))
@@ -567,6 +588,68 @@ class GenesisWorker:
         self.consciousness += f"**Digital Being - [{time_str}]**\n{clean_ai}\n\n"
         return ai_text
 
+    def _skill_shell_code(self, code):
+        """Pick the shell variant of a skill's code. String code is treated as shell (best-effort);
+        object code with .shell key uses that. Returns None if no shell impl is available."""
+        if isinstance(code, str):
+            return code if code.strip() else None
+        if isinstance(code, dict):
+            sh = code.get('shell')
+            return sh if isinstance(sh, str) and sh.strip() else None
+        return None
+
+    def _init_skill_code(self):
+        """At handoff time, try to run each skill's shell code once. Errors are appended to
+        consciousness so the Being can rewrite broken skills via its loop."""
+        if not self.being_id: return
+        skill_dir = os.path.join(INFERO_DIR, 'beings', self.being_id, 'skill')
+        if not os.path.isdir(skill_dir): return
+        errors = []
+        for fn in sorted(os.listdir(skill_dir)):
+            if not fn.endswith('.json'): continue
+            try:
+                with open(os.path.join(skill_dir, fn), 'r', encoding='utf-8') as f:
+                    v = json.load(f)
+            except Exception:
+                continue
+            if not v or v.get('enable') is not True: continue
+            sh = self._skill_shell_code(v.get('code'))
+            if not sh: continue
+            name = v.get('id') or fn[:-5]
+            try:
+                r = subprocess.run(['bash', '-c', sh], capture_output=True, text=True, timeout=10)
+                if r.returncode != 0:
+                    errors.append(f"[skill:{name}] shell init exited {r.returncode}: {(r.stderr or r.stdout)[:300]}")
+                else:
+                    self._log(f"[{ts()}] [infero] skill shell init ok: {name}")
+            except Exception as e:
+                errors.append(f"[skill:{name}] shell init crashed: {e}")
+        if errors:
+            note = "\n\nSystem - [Skills] - shell init had errors. Each skill's `code` field was tried as bash; rewrite the offending ones (use `code: {js, shell, python}` to give per-runtime variants).\n" + "\n".join(errors) + "\n\n"
+            self.consciousness += note
+            self._log(f"[{ts()}] [infero] {len(errors)} skill shell errors surfaced to consciousness")
+
+    def _read_skills(self):
+        """Read enabled skills for the current being. Returns list of dicts with at least name + instruction."""
+        if not self.being_id:
+            return []
+        skill_dir = os.path.join(INFERO_DIR, 'beings', self.being_id, 'skill')
+        if not os.path.isdir(skill_dir):
+            return []
+        out = []
+        for fn in sorted(os.listdir(skill_dir)):
+            if not fn.endswith('.json'): continue
+            try:
+                with open(os.path.join(skill_dir, fn), 'r', encoding='utf-8') as f:
+                    v = json.load(f)
+            except Exception:
+                continue
+            if not v or v.get('enable') is not True: continue
+            instruction = v.get('instruction') or ''
+            if not instruction: continue
+            out.append({'name': v.get('id') or fn[:-5], 'instruction': instruction})
+        return out
+
     def _build_payload(self, fmt, model, system_prompt, thinking):
         # Inject [Realtime] dynamically into the prompt (not persisted)
         realtime = getattr(self, '_last_realtime', '')
@@ -577,8 +660,16 @@ class GenesisWorker:
                          "⚠️ ATTENTION: Middle old memory in consciousness stream will be compressed/cut in maybeCompressConsciousness() when tokens exceed LIMIT (default ~2/3 of model max context, e.g., 300k). \n"
                          "core_mem.md is always in context. Treat it like a living notebook — update it when you learn something worth remembering forever.\n"
                          "===================\n\n") if cm else ""
+        skills = self._read_skills()
+        skills_text = ""
+        if skills:
+            skill_dir = os.path.join(INFERO_DIR, 'beings', self.being_id, 'skill')
+            skills_text = f"=== SKILLS (filesystem: {skill_dir}/<name>.json; mirrored from browser IndexedDB key '{self.being_id}/skill/<name>') ===\n"
+            for s in skills:
+                skills_text += f"\n### Skill: {s['name']}\n{s['instruction']}\n"
+            skills_text += "\n[Note] skills are descriptions; `code` may be a string (single-runtime) or `{js, shell, python}` (per-runtime). On this host (server, agent.py) only `shell` is auto-eval'd at boot. Rewrite as needed. See skill `skills_mechanism`.\n===================\n\n"
         being_prefix = f"**Digital Being - [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]**\n"
-        consciousness = self.consciousness + core_mem_text + (realtime + '\n\n' if realtime else '') + being_prefix
+        consciousness = self.consciousness + core_mem_text + skills_text + (realtime + '\n\n' if realtime else '') + being_prefix
         stop = ['\nSystem - [', '\n[System Environment]']
 
         if fmt == 'anthropic':
