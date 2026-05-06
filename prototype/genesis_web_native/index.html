@@ -172,10 +172,22 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
                     // Each round: history block's right boundary hash matches the prior round's
                     // latest-turn cc write → lookback hit; new entry written for the new latest turn.
                     // 2 cache_control breakpoints, unbounded conversation length.
-                    // Lookbehind `(?<=^|\n)` anchors splits at line start (without it the lookahead
-                    // would match many sub-positions inside each turn header).
-                    const turnRe = /(?<=^|\n)(?=\*{0,2}[A-Za-z][\w\s]{0,29}\*{0,2}\s*[-–—]\s*\[[^\]\n]*\d[^\]\n]*\]\*{0,2}\n)/g;
-                    const turns = consciousness.length > 0 ? consciousness.split(turnRe).filter(t => t.length > 0) : [];
+                    // Anchor splits at line start. Avoid lookbehind (`(?<=^|\n)`) since Safari < 16.4
+                    // throws SyntaxError on it; instead match each header with a forward regex and
+                    // verify the preceding char is '\n' or start-of-string before accepting it.
+                    const headerRe = /\*{0,2}[A-Za-z][\w\s]{0,29}\*{0,2}\s*[-–—]\s*\[[^\]\n]*\d[^\]\n]*\]\*{0,2}\n/g;
+                    const turns = [];
+                    if (consciousness.length > 0) {
+                        const splits = [0];
+                        for (const m of consciousness.matchAll(headerRe)) {
+                            if (m.index === 0 || consciousness[m.index - 1] === '\n') splits.push(m.index);
+                        }
+                        splits.push(consciousness.length);
+                        for (let i = 0; i < splits.length - 1; i++) {
+                            const t = consciousness.slice(splits[i], splits[i + 1]);
+                            if (t.length > 0) turns.push(t);
+                        }
+                    }
                     const history = turns.slice(0, -1).join('');
                     const latest = turns.length > 0 ? turns[turns.length - 1] : '';
                     const userContent = [];
