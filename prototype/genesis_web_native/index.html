@@ -109,7 +109,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             async function loadStableHead() {
                 let coreMemText = "";
                 try {
-                    const db = await new Promise(r => { const req = indexedDB.open("GenesisDB"); req.onsuccess = () => r(req.result); });
+                    const db = await new Promise(r => { const req = indexedDB.open("GenesisDB", 3); req.onupgradeneeded = e => { const d = e.target.result; if (!d.objectStoreNames.contains("beings")) d.createObjectStore("beings", { keyPath: "id" }); }; req.onsuccess = () => r(req.result); });
                     const record = await new Promise(r => { const req = db.transaction("beings", "readonly").objectStore("beings").get(currentBeingId + "/core_mem.md"); req.onsuccess = () => r(req.result); });
                     const rawMem = (record && record.value) ? record.value : "";
                     const MAX_MEM = 20000;
@@ -1440,7 +1440,7 @@ Usage:
 - Update path: from a /browser exec block, read the value, edit, write back to the same key.
 
 Read/write example (inside a /browser exec block):
-const db = await new Promise(r => { const q = indexedDB.open("GenesisDB"); q.onsuccess = () => r(q.result); });
+const db = await new Promise(r => { const q = indexedDB.open("GenesisDB", 3); q.onupgradeneeded = e => { const d = e.target.result; if (!d.objectStoreNames.contains("beings")) d.createObjectStore("beings", { keyPath: "id" }); }; q.onsuccess = () => r(q.result); });
 const key = currentBeingId + "/core_mem.md";
 const cur = await new Promise(r => { const q = db.transaction("beings","readonly").objectStore("beings").get(key); q.onsuccess = () => r(q.result?.value || ""); });
 const next = cur + "\\n\\nnew note...";
@@ -1517,7 +1517,7 @@ A 12-word BIP-39 mnemonic auto-generated on first boot, stored at IndexedDB \`{b
     const bip39 = await import('https://esm.sh/@scure/bip39@1.5.0');
     const wl = await import('https://esm.sh/@scure/bip39@1.5.0/wordlists/english');
     const { HDKey } = await import('https://esm.sh/@scure/bip32@1.7.0');
-    const db = await new Promise(r => { const q = indexedDB.open("GenesisDB"); q.onsuccess = () => r(q.result); });
+    const db = await new Promise(r => { const q = indexedDB.open("GenesisDB", 3); q.onupgradeneeded = e => { const d = e.target.result; if (!d.objectStoreNames.contains("beings")) d.createObjectStore("beings", { keyPath: "id" }); }; q.onsuccess = () => r(q.result); });
     const key = window.currentBeingId + "/identity";
     let val = await new Promise(r => { const q = db.transaction("beings","readonly").objectStore("beings").get(key); q.onsuccess = () => r(q.result?.value); });
     let mnemonic;
@@ -1546,7 +1546,7 @@ window.identityCreateFresh = async function() {
     const master = HDKey.fromMasterSeed(seed);
     const beingChild = master.derive("m/44'/1637'/0'/0/0");
     const pubkey = Array.from(beingChild.publicKey).map(b => b.toString(16).padStart(2, '0')).join('');
-    const db = await new Promise(r => { const q = indexedDB.open("GenesisDB"); q.onsuccess = () => r(q.result); });
+    const db = await new Promise(r => { const q = indexedDB.open("GenesisDB", 3); q.onupgradeneeded = e => { const d = e.target.result; if (!d.objectStoreNames.contains("beings")) d.createObjectStore("beings", { keyPath: "id" }); }; q.onsuccess = () => r(q.result); });
     await new Promise(r => { const q = db.transaction("beings","readwrite").objectStore("beings").put({ id: pubkey + "/identity", value: { mnemonic, version: 1, created_at: Date.now() } }); q.onsuccess = r; });
     return { mnemonic, pubkey, shortId: pubkey.slice(0, 8) };
 };
@@ -1581,7 +1581,7 @@ window.identityImport = async function(words) {
     const bip39 = await import('https://esm.sh/@scure/bip39@1.5.0');
     const wl = await import('https://esm.sh/@scure/bip39@1.5.0/wordlists/english');
     if (!bip39.validateMnemonic(trimmed, wl.wordlist)) throw new Error('Invalid BIP-39 mnemonic (checksum failed)');
-    const db = await new Promise(r => { const q = indexedDB.open("GenesisDB"); q.onsuccess = () => r(q.result); });
+    const db = await new Promise(r => { const q = indexedDB.open("GenesisDB", 3); q.onupgradeneeded = e => { const d = e.target.result; if (!d.objectStoreNames.contains("beings")) d.createObjectStore("beings", { keyPath: "id" }); }; q.onsuccess = () => r(q.result); });
     const key = window.currentBeingId + "/identity";
     await new Promise(r => { const q = db.transaction("beings","readwrite").objectStore("beings").put({ id: key, value: { mnemonic: trimmed, version: 1, created_at: Date.now(), imported: true } }); q.onsuccess = r; });
     delete window._identity;
