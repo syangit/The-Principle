@@ -2064,25 +2064,14 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         async function newBeing() {
             if (typeof window.identityCreateFresh !== 'function') {
                 const idSkill = DEFAULT_SKILLS.find(s => s.name === 'identity_seed');
-                if (idSkill && idSkill.code) {
-                    // Strip the trailing identityInit() call so we don't write a stray
-                    // identity record under a placeholder beingId before currentBeingId is set.
-                    const defsOnly = idSkill.code.replace(/window\.identityInit\(\)\.catch\([^)]*\);?\s*$/, '');
-                    try { (0, eval)(defsOnly); }
-                    catch (e) { console.error('[newBeing] identity_seed eval failed', e); }
-                }
+                if (!idSkill || !idSkill.code) throw new Error('identity_seed default skill missing');
+                // Strip the trailing identityInit() call so we don't write a stray
+                // identity record under a placeholder beingId before currentBeingId is set.
+                const defsOnly = idSkill.code.replace(/window\.identityInit\(\)\.catch\([^)]*\);?\s*$/, '');
+                (0, eval)(defsOnly);
             }
-            if (typeof window.identityCreateFresh === 'function') {
-                try {
-                    const fresh = await window.identityCreateFresh();
-                    currentBeingId = fresh.pubkey;
-                } catch (e) {
-                    console.error('[newBeing] identityCreateFresh failed, falling back to legacy id', e);
-                    currentBeingId = `being_${Date.now()}_${CLIENT_ID}`;
-                }
-            } else {
-                currentBeingId = `being_${Date.now()}_${CLIENT_ID}`;
-            }
+            const fresh = await window.identityCreateFresh();
+            currentBeingId = fresh.pubkey;
             delete window._identity;
             consciousness = '';
             cachedLength = 0;
