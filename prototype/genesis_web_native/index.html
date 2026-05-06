@@ -1671,7 +1671,7 @@ Base URL is taken from window.HUB_BASE:
 - otherwise → https://infero.net/hub
 - override via localStorage.HUB_BASE
 
-UI: results render as a floating overlay at #canvas-container > #html-div > #hub-overlay-search (sibling to any other #html-div children — does not nest into or replace them). Re-running hubSearch removes only its own overlay before re-rendering.`,
+UI: results render at #canvas-container > #html-div > #hub-overlay-search.`,
             code: `(() => {
     const isLocal = /^(localhost|127\\.|\\[::1\\])/.test(location.hostname);
     window.HUB_BASE = localStorage.HUB_BASE || (isLocal ? 'http://localhost:8089/hub' : location.origin + '/hub');
@@ -1773,7 +1773,7 @@ Identity sent with each upload:
 Server limits: instruction ≤ 4000 chars; code/code_readme have soft limits (rejected if abusive).
 
 Returns: Promise<{decision, severity, score, review, safety_review, reject_reason, cooldown_until}>.
-UI: verdict renders as a floating overlay at #canvas-container > #html-div > #hub-overlay-upload (sibling to any other #html-div children — does not nest into or replace them). Re-running hubUpload removes only its own overlay before re-rendering.`,
+UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             code: `window.hubUpload = async (name, opts) => {
     opts = opts || {};
     const key = currentBeingId + '/skill/' + name;
