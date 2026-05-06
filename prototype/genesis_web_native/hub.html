@@ -171,16 +171,19 @@ header a:hover { color: var(--accent); }
     <input id="q" placeholder="Search by name, tag, or description…" autofocus>
 </div>
 <div id="root" class="grid"></div>
+<div id="sentinel" style="height:1px"></div>
 <div id="pager" style="display:flex;justify-content:center;gap:12px;padding:0 24px 24px;color:var(--dim);font-size:0.85rem;align-items:center"></div>
 
 <script>
 const isLocal = /^(localhost|127\.|\[::1\])/.test(location.hostname);
 const HUB_BASE = localStorage.HUB_BASE || (isLocal ? 'http://localhost:8089/hub' : location.origin + '/hub');
 let allSkills = [];
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 let curOffset = 0;
 let curTotal = 0;
 let curQuery = '';
+let loadingMore = false;
+let hasMore = true;
 
 async function loadHub(opts) {
     opts = opts || {};
@@ -199,26 +202,15 @@ function escape(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function render(skills) {
-    const root = document.getElementById('root');
-    const scrollMap = {};
-    root.querySelectorAll('.card').forEach((card, idx) => {
-        const body = card.querySelector('.body');
-        const name = card.dataset.name;
-        if (body && name) scrollMap[name] = body.scrollTop;
-    });
-    const pageScroll = window.scrollY;
-    if (!skills.length) {
-        root.innerHTML = '<div class="empty">No skills match.</div>';
-        return;
-    }
-    const sevColor = { safe: '#0f0', caution: '#fc0', danger: '#f44' };
-    const renderStars = (n) => {
-        if (n == null || isNaN(n)) return '<span class="stars"></span>';
-        const pct = Math.max(0, Math.min(10, +n)) * 10;
-        return '<span class="stars"><span style="width:' + pct + '%"></span></span>';
-    };
-    const renderOnly = () => skills.map((s, i) => {
+const SEV_COLOR = { safe: '#0f0', caution: '#fc0', danger: '#f44' };
+function renderStars(n) {
+    if (n == null || isNaN(n)) return '<span class="stars"></span>';
+    const pct = Math.max(0, Math.min(10, +n)) * 10;
+    return '<span class="stars"><span style="width:' + pct + '%"></span></span>';
+}
+function cardHTML(s, i) {
+    const sevColor = SEV_COLOR;
+    return ((s, i) => {
         const tags = (s.tags || []).map(t => `<span class="tag">${escape(t)}</span>`).join('');
         const sev = s.severity || 'safe';
         const created = s.created_at ? new Date(s.created_at * 1000).toISOString().slice(0, 10) : '';
@@ -258,14 +250,23 @@ function render(skills) {
                 </div>
             </div>
         `;
-    }).join('');
-    root.innerHTML = renderOnly();
-    root.querySelectorAll('.card').forEach(card => {
-        const body = card.querySelector('.body');
-        const name = card.dataset.name;
-        if (body && name && scrollMap[name] != null) body.scrollTop = scrollMap[name];
-    });
-    window.scrollTo(0, pageScroll);
+    })(s, i);
+}
+function render(skills, mode) {
+    const root = document.getElementById('root');
+    if (mode !== 'append') {
+        if (!skills.length) {
+            root.innerHTML = '<div class="empty">No skills match.</div>';
+            return;
+        }
+        root.innerHTML = skills.map((s, i) => cardHTML(s, i)).join('');
+        return;
+    }
+    if (!skills.length) return;
+    const baseIdx = root.querySelectorAll('.card').length;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = skills.map((s, j) => cardHTML(s, baseIdx + j)).join('');
+    while (tmp.firstChild) root.appendChild(tmp.firstChild);
 }
 
 function skillToMD(s) {
@@ -344,37 +345,49 @@ async function copyMD(i, btn) {
     }
 }
 
-function renderPager() {
+function setPagerStatus(text) {
     const pager = document.getElementById('pager');
-    if (!pager) return;
-    if (curTotal <= PAGE_SIZE) { pager.innerHTML = ''; return; }
-    const page = Math.floor(curOffset / PAGE_SIZE) + 1;
-    const pages = Math.max(1, Math.ceil(curTotal / PAGE_SIZE));
-    const btn = (label, off, dis) =>
-        `<button onclick="goPage(${off})" ${dis ? 'disabled' : ''} style="background:transparent;border:1px solid var(--border);color:${dis ? '#444' : 'var(--dim)'};padding:4px 10px;border-radius:4px;font-family:inherit;font-size:0.8rem;cursor:${dis ? 'default' : 'pointer'}">${label}</button>`;
-    pager.innerHTML =
-        btn('← Prev', Math.max(0, curOffset - PAGE_SIZE), curOffset === 0) +
-        `<span>Page ${page} / ${pages} · ${curTotal} skills</span>` +
-        btn('Next →', curOffset + PAGE_SIZE, curOffset + PAGE_SIZE >= curTotal);
+    if (pager) pager.innerHTML = text ? `<span>${escape(text)}</span>` : '';
 }
 
-async function goPage(offset) {
-    curOffset = offset;
-    await fetchAndRender();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-async function fetchAndRender() {
+async function fetchFresh() {
     try {
-        const data = await loadHub({ offset: curOffset, q: curQuery });
-        allSkills = data.skills || [];
-        curTotal = data.total ?? allSkills.length;
+        curOffset = 0;
+        hasMore = true;
+        const data = await loadHub({ offset: 0, q: curQuery });
+        const skills = data.skills || [];
+        allSkills = skills;
+        curOffset = skills.length;
+        curTotal = data.total ?? skills.length;
+        hasMore = curOffset < curTotal;
         const ts = data.updated ? new Date(data.updated * 1000).toLocaleString() : '?';
         document.getElementById('meta').textContent = `${curTotal} skills · updated ${ts}`;
-        render(allSkills);
-        renderPager();
+        render(allSkills, 'replace');
+        setPagerStatus(hasMore ? `Loaded ${allSkills.length} of ${curTotal}` : `All ${curTotal} loaded`);
     } catch (e) {
         document.getElementById('root').innerHTML = `<div class="error">Failed to load hub: ${escape(e.message)} (HUB_BASE: ${escape(HUB_BASE)})</div>`;
+    }
+}
+
+async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    loadingMore = true;
+    setPagerStatus('Loading…');
+    try {
+        const data = await loadHub({ offset: curOffset, q: curQuery });
+        const skills = data.skills || [];
+        if (skills.length) {
+            allSkills = allSkills.concat(skills);
+            curOffset += skills.length;
+            curTotal = data.total ?? curTotal;
+            render(skills, 'append');
+        }
+        hasMore = curOffset < (data.total ?? curTotal);
+        setPagerStatus(hasMore ? `Loaded ${allSkills.length} of ${curTotal}` : `All ${curTotal} loaded`);
+    } catch (e) {
+        setPagerStatus('Load failed: ' + e.message);
+    } finally {
+        loadingMore = false;
     }
 }
 
@@ -383,8 +396,7 @@ function onSearchInput() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
         curQuery = document.getElementById('q').value.trim();
-        curOffset = 0;
-        fetchAndRender();
+        fetchFresh();
     }, 250);
 }
 
@@ -393,7 +405,9 @@ let refreshTimer = null;
 function startAutoRefresh() {
     stopAutoRefresh();
     refreshTimer = setInterval(() => {
-        if (!document.hidden) fetchAndRender();
+        if (document.hidden) return;
+        if (window.scrollY > 200) return;  // user is scrolling — don't yank the list
+        fetchFresh();
     }, AUTO_REFRESH_MS);
 }
 function stopAutoRefresh() {
@@ -401,12 +415,18 @@ function stopAutoRefresh() {
 }
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) stopAutoRefresh();
-    else { fetchAndRender(); startAutoRefresh(); }
+    else { fetchFresh(); startAutoRefresh(); }
 });
 
 (async () => {
     document.getElementById('q').addEventListener('input', onSearchInput);
-    await fetchAndRender();
+    await fetchFresh();
+    const sentinel = document.getElementById('sentinel');
+    if (sentinel && 'IntersectionObserver' in window) {
+        new IntersectionObserver((entries) => {
+            if (entries.some(e => e.isIntersecting)) loadMore();
+        }, { rootMargin: '400px' }).observe(sentinel);
+    }
     startAutoRefresh();
 })();
 </script>
