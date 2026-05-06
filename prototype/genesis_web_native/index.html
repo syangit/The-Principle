@@ -2062,6 +2062,16 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         }
 
         async function newBeing() {
+            if (typeof window.identityCreateFresh !== 'function') {
+                const idSkill = DEFAULT_SKILLS.find(s => s.name === 'identity_seed');
+                if (idSkill && idSkill.code) {
+                    // Strip the trailing identityInit() call so we don't write a stray
+                    // identity record under a placeholder beingId before currentBeingId is set.
+                    const defsOnly = idSkill.code.replace(/window\.identityInit\(\)\.catch\([^)]*\);?\s*$/, '');
+                    try { (0, eval)(defsOnly); }
+                    catch (e) { console.error('[newBeing] identity_seed eval failed', e); }
+                }
+            }
             if (typeof window.identityCreateFresh === 'function') {
                 try {
                     const fresh = await window.identityCreateFresh();
