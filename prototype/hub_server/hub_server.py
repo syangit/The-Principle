@@ -551,7 +551,7 @@ async def hub_list(sort: str = "hot", q: Optional[str] = None, limit: int = 5, o
         "total": total,
         "limit": limit,
         "offset": offset,
-        "skills": [skill_to_dict(r, include_code=False, summary=True) for r in page],
+        "skills": [skill_to_dict(r, include_code=True, summary=True) for r in page],
     }
 
 @app.get("/hub/skill/{name}")

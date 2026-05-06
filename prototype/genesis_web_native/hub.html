@@ -233,11 +233,10 @@ function cardHTML(s, i) {
                             : `<pre>${escape(s.code)}</pre>`) : ''
                     }${
                         s.note ? (() => {
-                            const n = s.note;
-                            const cap = 600;
-                            const head = n.slice(0, cap);
-                            const more = n.length > cap;
-                            return `<div style="margin-top:10px;color:#888;font-size:0.78rem"><b style="color:#aaa">note</b> <span style="color:#666">· ${n.length} chars</span><br><div style="color:#bbb;white-space:pre-wrap;margin-top:4px">${escape(head)}${more ? '…' : ''}</div>${more ? `<button onclick="showNote(this)" data-note="${escape(n)}" style="margin-top:6px;background:transparent;border:1px solid var(--border);color:var(--dim);padding:2px 8px;border-radius:3px;font-family:inherit;font-size:0.72rem;cursor:pointer">Show full note</button>` : ''}</div>`;
+                            const truncated = !!s.note_truncated;
+                            const fullChars = s.note_full_chars ?? s.note.length;
+                            const lenLabel = truncated ? `${s.note.length} of ${fullChars} chars (preview)` : `${fullChars} chars`;
+                            return `<div style="margin-top:10px;color:#888;font-size:0.78rem"><b style="color:#aaa">note</b> <span style="color:#666">· ${lenLabel}</span><br><div style="color:#bbb;white-space:pre-wrap;margin-top:4px">${escape(s.note)}${truncated ? '…' : ''}</div>${truncated ? `<button onclick="showFullNote('${escape(s.name)}', this)" style="margin-top:6px;background:transparent;border:1px solid var(--border);color:var(--dim);padding:2px 8px;border-radius:3px;font-family:inherit;font-size:0.72rem;cursor:pointer">Show full note (${fullChars} chars)</button>` : ''}</div>`;
                         })() : ''
                     }${
                         s.contact ? `<div style="margin-top:10px;color:#888;font-size:0.78rem"><b style="color:#aaa">contact</b><br><span style="color:#9cdcfe;white-space:pre-wrap">${escape(s.contact)}</span></div>` : ''
@@ -297,8 +296,7 @@ function skillToMD(s) {
     return lines.join('\n');
 }
 
-function showNote(btn) {
-    const text = btn.dataset.note || '';
+function openNoteModal(text) {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px';
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
@@ -314,6 +312,21 @@ function showNote(btn) {
     box.appendChild(body);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
+}
+
+async function showFullNote(name, btn) {
+    const orig = btn.textContent;
+    btn.textContent = 'Loading…'; btn.disabled = true;
+    try {
+        const r = await fetch(HUB_BASE + '/skill/' + encodeURIComponent(name), { credentials: 'include' });
+        if (!r.ok) throw new Error('fetch failed: ' + r.status);
+        const s = await r.json();
+        openNoteModal(s.note || '(empty)');
+        btn.textContent = orig; btn.disabled = false;
+    } catch (e) {
+        btn.textContent = 'Error: ' + e.message;
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000);
+    }
 }
 
 function shareUrl(name) {
