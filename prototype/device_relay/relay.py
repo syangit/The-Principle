@@ -426,22 +426,59 @@ $env:INSTANCE_ID = $INSTANCE_ID; $env:TOKEN = $TOKEN
 $env:BROWSER_PUB = $BROWSER_PUB; $env:RELAY_WS = $RELAY_WS
 $env:RELAY_HTTP = $RELAY_HTTP; $env:CLIENT_NAME = $CLIENT_NAME; $env:INFERO_DIR = $INFERO_DIR
 
-& "$VENV_DIR\Scripts\python.exe" -c @"
-import json, os
+$VWORDS_LINE = & "$VENV_DIR\Scripts\python.exe" -c @"
+import json, os, base64, hashlib, urllib.request
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.ec import ECDH, SECP256R1
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from datetime import datetime
-f = os.path.join(os.environ['INFERO_DIR'], 'instances.json')
+
+browser_pub_b64 = os.environ['BROWSER_PUB']
+relay_http = os.environ['RELAY_HTTP']
+instance_id = os.environ['INSTANCE_ID']
+token = os.environ['TOKEN']
+relay_ws = os.environ['RELAY_WS']
+client_name = os.environ['CLIENT_NAME']
+infero_dir = os.environ['INFERO_DIR']
+
+pad = 4 - len(browser_pub_b64) % 4
+if pad != 4: browser_pub_b64 += '=' * pad
+browser_pub_bytes = base64.b64decode(browser_pub_b64)
+browser_pub = ec.EllipticCurvePublicKey.from_encoded_point(SECP256R1(), browser_pub_bytes)
+device_priv = ec.generate_private_key(SECP256R1())
+shared = device_priv.exchange(ECDH(), browser_pub)
+aes_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b'infero-device-relay-v1').derive(shared)
+device_pub_b64 = base64.b64encode(device_priv.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)).decode()
+aes_key_b64 = base64.b64encode(aes_key).decode()
+
+try:
+    bip39 = urllib.request.urlopen(relay_http + '/bip39', timeout=5).read().decode().split()
+except Exception:
+    bip39 = []
+if len(bip39) >= 2048:
+    h = hashlib.sha256(aes_key).digest()
+    n = (h[0] << 14) | (h[1] << 6) | (h[2] >> 2)
+    vwords = bip39[n >> 11] + ' ' + bip39[n & 0x7ff]
+else:
+    vwords = '(wordlist unavailable)'
+
+f = os.path.join(infero_dir, 'instances.json')
 try: instances = json.load(open(f))
 except: instances = []
-iid = os.environ['INSTANCE_ID']
-existing = next((i for i in instances if i.get('instance_id') == iid), None)
+existing = next((i for i in instances if i.get('instance_id') == instance_id), None)
 first_added = existing.get('first_added') if existing else datetime.now().strftime('%b %d, %Y, %H:%M')
-instances = [i for i in instances if i.get('instance_id') != iid]
-instances.append({'instance_id': iid, 'token': os.environ['TOKEN'],
-                  'browser_pub': os.environ['BROWSER_PUB'], 'relay_ws': os.environ['RELAY_WS'],
-                  'relay_http': os.environ['RELAY_HTTP'], 'client_name': os.environ['CLIENT_NAME'],
-                  'first_added': first_added})
+instances = [i for i in instances if i.get('instance_id') != instance_id]
+instances.append({'instance_id': instance_id, 'token': token,
+                  'browser_pub': browser_pub_b64.rstrip('='),
+                  'aes_key': aes_key_b64, 'device_pub': device_pub_b64,
+                  'relay_ws': relay_ws, 'relay_http': relay_http,
+                  'client_name': client_name, 'first_added': first_added})
 json.dump(instances, open(f, 'w'), indent=2)
+print('VWORDS:' + vwords)
 "@
+$VWORDS = ($VWORDS_LINE | Where-Object { $_ -match '^VWORDS:' } | Select-Object -Last 1) -replace '^VWORDS:', ''
 Write-Host "[infero] Instance saved"
 
 $Action = New-ScheduledTaskAction -Execute "$VENV_DIR\Scripts\python.exe" -Argument "-u `"$AGENT`""
@@ -450,19 +487,6 @@ $Settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999
 Register-ScheduledTask -TaskName "InferoDevice" -Action $Action -Trigger $Trigger -Settings $Settings -Force | Out-Null
 Write-Host "[infero] Auto-start registered (Task Scheduler)"
 
-$LOGFILE = "$INFERO_DIR\agent.log"
-Write-Host ""
-Write-Host "[infero] Connecting to relay..."
-Start-Process -WindowStyle Hidden -FilePath "$VENV_DIR\Scripts\python.exe" -ArgumentList "-u `"$AGENT`""
-$VWORDS = ""
-for ($i = 0; $i -lt 30; $i++) {
-    Start-Sleep -Seconds 1
-    if (Test-Path $LOGFILE) {
-        $match = Select-String -Path $LOGFILE -Pattern '\| verify: ' -ErrorAction SilentlyContinue | Select-Object -Last 1
-        if ($match) { $VWORDS = ($match.Line -replace '.*\| verify: ', '').Trim(); break }
-    }
-}
-
 Write-Host ""
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 Write-Host " Pairing request sent"
@@ -470,6 +494,10 @@ if ($VWORDS) { Write-Host " Verify Words: $VWORDS" }
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 Write-Host "  This device will auto-connect on every login."
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+Write-Host ""
+Write-Host "[infero] Connecting to relay..."
+Start-Process -WindowStyle Hidden -FilePath "$VENV_DIR\Scripts\python.exe" -ArgumentList "-u `"$AGENT`""
 """
 
 def build_script_ps1(relay_ws, instance_id, token, browser_pub, client_name='Unknown', relay_http=None):
