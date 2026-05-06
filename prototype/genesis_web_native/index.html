@@ -7,13 +7,6 @@
     <title>INFERO</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='none' stroke='%2300d4aa' stroke-width='4'/><circle cx='50' cy='50' r='8' fill='%2300d4aa'/></svg>">
     <script>
-        // Pin body height to actual viewport pixels — sidesteps Safari `vh`/`dvh`
-        // quirks (some 15.x versions return slightly larger values than the
-        // visible area, pushing the input bar off-screen).
-        function _pinBodyH() { if (document.body) document.body.style.height = window.innerHeight + 'px'; }
-        window.addEventListener('resize', _pinBodyH);
-        window.addEventListener('DOMContentLoaded', _pinBodyH);
-
         // =====================================================
         // BIS Core (Infero, ergo sum.)
         // =====================================================
@@ -1925,6 +1918,13 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         const resizeObserver = new ResizeObserver(resizeCanvas);
         resizeObserver.observe(container);
         resizeCanvas();
+
+        // Pin body to actual viewport pixels — Safari 15.x desktop occasionally
+        // computes 100vh/100dvh slightly larger than the visible area, pushing
+        // the input bar off-screen. innerHeight is the precise visible height.
+        function pinBodyHeight() { document.body.style.height = window.innerHeight + 'px'; }
+        window.addEventListener('resize', pinBodyHeight);
+        pinBodyHeight();
 
         async function loadBeingsList() {
             const beings = (await DB.list()).filter(s => !s.id.includes('/'));
