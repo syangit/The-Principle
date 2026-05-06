@@ -1919,9 +1919,6 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         resizeObserver.observe(container);
         resizeCanvas();
 
-        // Pin body to actual viewport pixels — Safari 15.x desktop occasionally
-        // computes 100vh/100dvh slightly larger than the visible area, pushing
-        // the input bar off-screen. innerHeight is the precise visible height.
         function pinBodyHeight() { document.body.style.height = window.innerHeight + 'px'; }
         window.addEventListener('resize', pinBodyHeight);
         pinBodyHeight();
