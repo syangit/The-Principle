@@ -63,7 +63,15 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
                 // Continue only when /self_continue is explicit; stop on /call_for_trigger or when neither signal present
                 const cont = lastSC !== -1 || !!currentUserInput;
                 console.log(`[loop] lastSC=${lastSC} lastCFH=${lastCFH} currentUserInput=${!!currentUserInput} cont=${cont} → ${cont ? 'continue' : 'stop(CFH)'}`);
-                if (cont) return loop();
+                if (cont) {
+                    currentAbortController = new AbortController();
+                    await new Promise(r => {
+                        const t = setTimeout(r, 1000);
+                        currentAbortController.signal.addEventListener('abort', () => { clearTimeout(t); r(); });
+                    });
+                    if (currentAbortController?.signal.aborted) return;
+                    return loop();
+                }
             } catch (e) {
                 if (e.name === 'AbortError') return;              // user stopped, clean exit
                 console.error(e);
