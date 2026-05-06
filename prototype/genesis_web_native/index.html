@@ -3652,6 +3652,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         }
 
         async function boot() {
+            await DB.open();   // bootstrap IDB schema (v3 + 'beings' store) before any branch
             await loadModels();
             const params = new URLSearchParams(location.search);
             const skillsParam = params.get('skills');
