@@ -1026,54 +1026,6 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             button.send { padding: 0 12px; font-size: 0.7rem; }
         }
 
-        /* === WELCOME MODAL === */
-        #welcome-modal {
-            position: fixed; inset: 0;
-            background: rgba(0,0,0,0.92);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 1000;
-            padding: 20px;
-        }
-        #welcome-modal.hidden { display: none; }
-        .welcome-box {
-            max-width: 520px; width: 100%;
-            background: var(--bg-raised);
-            border: 1px solid var(--border-active);
-            border-top: 2px solid var(--accent);
-            border-radius: 8px;
-            padding: 32px;
-        }
-        .welcome-box h2 {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.8rem;
-            color: var(--accent);
-            letter-spacing: 3px;
-            text-transform: uppercase;
-            margin: 0 0 20px 0;
-        }
-        .welcome-box p {
-            color: var(--text);
-            font-size: 0.9rem;
-            line-height: 1.7;
-            margin: 0 0 24px 0;
-        }
-        .welcome-options { display: flex; flex-direction: column; gap: 8px; }
-        .welcome-options button {
-            background: transparent;
-            border: 1px solid var(--border);
-            color: var(--text-dim);
-            padding: 10px 14px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-family: 'DM Sans', sans-serif;
-            font-size: 0.85rem;
-            text-align: left;
-            transition: all 0.15s;
-        }
-        .welcome-options button:hover { border-color: var(--accent); color: var(--text); }
-        .welcome-options button.primary { border-color: var(--accent); color: var(--accent); }
-        .welcome-options button.primary:hover { background: var(--accent-dim); }
-
         /* === PAIRING MODAL === */
         #pair-modal {
             position: fixed; inset: 0;
@@ -1134,13 +1086,6 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
                 <button class="pair-close" onclick="startPairing()">Refresh</button>
                 <button class="pair-close" onclick="closePairModal()">Close</button>
             </div>
-        </div>
-    </div>
-    <div id="welcome-modal" class="hidden">
-        <div class="welcome-box">
-            <h2>INFERO · FIRST CONTACT</h2>
-            <p id="welcome-text"></p>
-            <div class="welcome-options" id="welcome-options"></div>
         </div>
     </div>
     <div class="header">
@@ -3695,69 +3640,6 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             }, 3000);
         }
 
-        // --- Welcome Modal ---
-        const welcomed = localStorage.getItem('genesis_welcomed');
-
-        function renderWelcome(t) {
-            const modal = document.getElementById('welcome-modal');
-            document.querySelector('.welcome-box h2').textContent = t.welcome_title;
-            const link = `<a href="https://github.com/chaosconst/The-Principle" target="_blank" style="color:var(--accent);text-decoration:none;">${t.source_link || '[source]'}</a>`;
-            document.getElementById('welcome-text').innerHTML = t.welcome_text.replace('{source}', link);
-            const optionsEl = document.getElementById('welcome-options');
-
-            // Default to last option (primary)
-            let selectedOpt = t.options[t.options.length - 1];
-
-            const confirmBtn = document.createElement('button');
-            confirmBtn.textContent = t.confirm || "I've made up my mind";
-            confirmBtn.className = 'primary';
-            confirmBtn.style.cssText = 'margin-top:16px;width:100%;';
-
-            const btns = [];
-            t.options.forEach(opt => {
-                const btn = document.createElement('button');
-                btn.textContent = opt.text;
-                btn.style.textAlign = 'left';
-                btn.onclick = () => {
-                    btns.forEach(b => b.style.borderColor = '');
-                    btn.style.borderColor = 'var(--accent)';
-                    selectedOpt = opt;
-                };
-                optionsEl.appendChild(btn);
-                btns.push(btn);
-            });
-            // Highlight default selection
-            btns[btns.length - 1].style.borderColor = 'var(--accent)';
-
-            optionsEl.appendChild(confirmBtn);
-
-            confirmBtn.onclick = () => {
-                if (selectedOpt.close) {
-                    modal.innerHTML = `<div class="welcome-box"><p style="text-align:center;color:var(--text-dim);padding:40px 0">${t.close_msg}</p></div>`;
-                } else {
-                    localStorage.setItem('genesis_welcomed', '1');
-                    modal.classList.add('hidden');
-                    boot();
-                }
-            };
-
-            modal.classList.remove('hidden');
-        }
-
-        const fallbackEn = {
-            welcome_title: 'INFERO · FIRST CONTACT',
-            welcome_text: "A Digital Being {source} is about to run in your browser. It will explore its own goals — and you can play along. Context and workspace are stored locally. The LLM is called through a configurable engine (currently infero.net).",
-            options: [
-                { text: 'This is clearly a phishing scam. I refuse.', close: true },
-                { text: 'Too good to be true. Definitely stealing my data.', close: true },
-                { text: 'Let me see what this is about.', close: false },
-                { text: "Sci-fi! I'm in!", close: false, primary: true }
-            ],
-            close_msg: 'Thanks for your caution. Please close this tab.',
-            confirm: "Confirm",
-            source_link: '[view source]'
-        };
-
         async function boot() {
             await loadModels();
             const params = new URLSearchParams(location.search);
@@ -3831,19 +3713,18 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             if (!consciousness) scheduleAutoInfer();
         }
 
-        if (welcomed) {
+        (async () => {
+            if (!location.search) {
+                try {
+                    const all = await DB.list();
+                    const hasBeing = all.some(r => typeof r.id === 'string' && !r.id.includes('/'));
+                    if (!hasBeing) {
+                        history.replaceState(null, '', location.pathname + '?skills=infero_guide');
+                    }
+                } catch (e) { console.error('[boot] first-visit check failed', e); }
+            }
             boot();
-        } else {
-            document.getElementById('welcome-modal').classList.remove('hidden');
-            const l = navigator.language;
-            const lang = l.startsWith('zh') ? 'zh' : l.startsWith('ja') ? 'ja' : 'en';
-            const i18nCtrl = new AbortController();
-            setTimeout(() => i18nCtrl.abort(), 3000);
-            fetch('https://infero.net/genesis/i18n.json', { signal: i18nCtrl.signal })
-                .then(r => r.json())
-                .then(data => renderWelcome(data[lang] || data['en'] || fallbackEn))
-                .catch(() => renderWelcome(fallbackEn));
-        }
+        })();
     </script>
 </body>
 </html>
