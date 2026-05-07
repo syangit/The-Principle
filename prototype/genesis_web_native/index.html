@@ -2043,6 +2043,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
 
         var _relayWs = null;
         var _relayConnected = false;
+        var _relayGeneration = 0;
         var _pendingShellRequests = {};  // req_id -> {resolve, reject, timer, device_name}
         var _relayPingTimer = null;
         var _relayPongTimer = null;
@@ -2050,6 +2051,8 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
         var _pairCountdownInterval = null;
 
         function initRelay() {
+            const gen = ++_relayGeneration;
+            if (_relayWs) { _relayWs.onclose = null; _relayWs.close(); _relayWs = null; _relayConnected = false; }
             const url = settings.relayHost
                 ? (settings.relayHost.includes('://')
                     ? settings.relayHost.replace(/^https/, 'wss').replace(/^http/, 'ws').replace(/\/$/, '') + '/ws'
@@ -2060,6 +2063,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
             let _retryTimer = null;
             let _disconnectNotifyTimer = null;
             function scheduleReconnect() {
+                if (_relayGeneration !== gen) return;
                 clearTimeout(_retryTimer);
                 // Immediate first retry, then 1s for 10s, then exponential backoff
                 let delay;
@@ -2070,6 +2074,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 _retryCount++;
             }
             function connect() {
+                if (_relayGeneration !== gen) return;
                 try {
                     _relayWs = new WebSocket(url);
                 } catch (e) { scheduleReconnect(); return; }
@@ -2222,6 +2227,7 @@ TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wron
                 if (_newHost !== settings.relayHost) {
                     settings.relayHost = _newHost;
                     saveSettingsToStorage(settings);
+                    initRelay();
                 }
                 selectPairOS(window._pairSelectedOS);
                 const _pairExpireAt = Date.now() + 300000;
