@@ -1982,9 +1982,12 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             await loadBeingsList();
         }
 
-        async function renderHistory() {
+        async function renderHistory(keepUI = false) {
             chatBox.innerHTML = '<div class="msg ai">System online. Initializing.</div>';
-            if (!consciousness) { cancelAllAnimations(); canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); document.getElementById('html-div').innerHTML = ''; return; }
+            if (!consciousness) {
+                if (!keepUI) { cancelAllAnimations(); canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); document.getElementById('html-div').innerHTML = ''; }
+                return;
+            }
 
             // Only render the last 100k characters to keep UI responsive
             const RENDER_LIMIT = 100000;
@@ -2024,10 +2027,10 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 }
             }
             scrollToBottom(true);
+            if (keepUI) return;
             cancelAllAnimations();
             canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
             document.getElementById('html-div').innerHTML = '';
-            // Restore snapshot
             const snap = await DB.get(`${currentBeingId}/snapshot`);
             if (snap) {
                 if (snap.htmlContent) document.getElementById('html-div').innerHTML = snap.htmlContent;
@@ -2450,7 +2453,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             await appendConsciousness('');  // persist
             // Put text into input box
             document.getElementById('input').value = userText;
-            await renderHistory();
+            await renderHistory(true);
         }
 
         // --- Settings UI ---
