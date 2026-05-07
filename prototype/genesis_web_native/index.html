@@ -2216,7 +2216,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             const osPart = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' :
                 /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' :
                 /Linux/.test(ua) ? 'Linux' : 'Unknown';
-            const browserLabel = `${browserName} · ${osPart}`;
+            const browserLabel = `${browserName} · ${osPart} · ${navigator.language}`;
 
             const devices = settings.devices || {};
             const browserHidden = settings.browserHidden || false;
