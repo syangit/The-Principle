@@ -100,181 +100,180 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             return S;
         }
 
+        async function loadStableHead() {
+            let coreMemText = "";
+            try {
+                const db = await new Promise(r => { const req = indexedDB.open("GenesisDB"); req.onsuccess = () => r(req.result); });
+                const record = await new Promise(r => { const req = db.transaction("beings", "readonly").objectStore("beings").get(currentBeingId + "/core_mem.md"); req.onsuccess = () => r(req.result); });
+                const rawMem = (record && record.value) ? record.value : "";
+                const MAX_MEM = 20000;
+                let memContent = rawMem.length > MAX_MEM
+                    ? rawMem.slice(0, MAX_MEM) + `\n\n[⚠️ core_mem truncated to ${MAX_MEM} chars. Full long_mem: ${rawMem.length} chars]`
+                    : rawMem;
+                coreMemText = "=== CORE MEMORY( in IndexedDB('GenesisDB', store='beings'){id: \"" + currentBeingId + "/core_mem.md\"}[value]) ===\n" +
+                              memContent +
+                              "\n\n[Architecture Note]\n" +
+                              "context = stableHead(core_mem + skills) + consciousness + volatileTail(realtime + beingPrefix)\n" +
+                              "⚠️ ATTENTION: Middle old memory in consciousness stream will be compressed/cut in `maybeCompressConsciousness()` when tokens exceed LIMIT (default ~2/3 of model max context, e.g., 300k).\n" +
+                              "core_mem.md is always in context. Treat it like a living notebook — update it when you learn something worth remembering forever.\n" +
+                              "===================\n\n";
+            } catch(e) { console.error("CoreMem load failed", e); }
+            let skillsText = "";
+            try {
+                const skills = await DB.listSkills(currentBeingId);
+                const enabled = skills.filter(s => s && s.enable === true && typeof s.instruction === 'string' && s.instruction.length > 0);
+                if (enabled.length) {
+                    skillsText = "=== SKILLS (IndexedDB key='" + currentBeingId + "/skill/{name}') ===\n";
+                    for (const s of enabled) {
+                        skillsText += "\n### Skill: " + s.name + "\n" + s.instruction + "\n";
+                        if (s.code && typeof s.code_readme === 'string' && s.code_readme.length > 0) {
+                            skillsText += "\n_call_ (code_readme):\n" + s.code_readme + "\n";
+                        }
+                    }
+                    const disabled = skills.filter(s => s && s.enable !== true).map(s => s.name);
+                    if (disabled.length) {
+                        const shown = disabled.slice(0, 50).join(", ");
+                        const overflow = disabled.length > 50 ? ` (+${disabled.length - 50} more — list truncated; query DB.listSkills for the full set)` : "";
+                        skillsText += "\n[Disabled (local, not loaded): " + shown + overflow + " — flip enable=true to activate]\n";
+                    }
+                    skillsText += "\n[Note] skills are descriptions by default; cached `code` is eval'd on boot. See skill `skills_mechanism` for CRUD.\n===================\n\n";
+                }
+            } catch (e) { console.error("Skills load failed", e); }
+            return coreMemText + skillsText;
+        }
+
+        async function buildPayload() {
+            const STOP_WORDS = ['\nSystem - [', '\n[System Environment]', '\n**Digital Being'];
+            const supportsVision = MODEL_LIST[settings.model]?.vision !== false;
+            const canvasImage = supportsVision ? await getCanvasImage() : null;
+            const stableHead = await loadStableHead();
+            const beingPrefix = `**Digital Being - [${new Date().toLocaleString()}]**\n`;
+            const volatileTail = getRealtimeContext() + '\n\n' + beingPrefix;
+
+            // Drop gemini named cache if stableHead changed since cache creation —
+            // server would otherwise prepend a stale snapshot.
+            if (cacheName && _cachedStableHead !== stableHead) {
+                console.log('[gemini cache] stableHead changed → invalidating cache');
+                cacheName = null;
+                cachedLength = 0;
+                _cachedStableHead = null;
+            }
+
+            const model = getActiveModel();
+
+            if (getActiveFormat() === 'anthropic') {
+                // Rolling-history segmentation:
+                //   [stableHead 🚩] [history = all-but-latest turn] [latest turn 🚩] [tail]
+                // Each round: history block's right boundary hash matches the prior round's
+                // latest-turn cc write → lookback hit; new entry written for the new latest turn.
+                // 2 cache_control breakpoints, unbounded conversation length.
+                // Anchor splits at line start. Avoid lookbehind (`(?<=^|\n)`) since Safari < 16.4
+                // throws SyntaxError on it; instead match each header with a forward regex and
+                // verify the preceding char is '\n' or start-of-string before accepting it.
+                const headerRe = /\*{0,2}[A-Za-z][\w\s]{0,29}\*{0,2}\s*[-–—]\s*\[[^\]\n]*\d[^\]\n]*\]\*{0,2}\n/g;
+                const turns = [];
+                if (consciousness.length > 0) {
+                    const splits = [0];
+                    for (const m of consciousness.matchAll(headerRe)) {
+                        if (m.index === 0 || consciousness[m.index - 1] === '\n') splits.push(m.index);
+                    }
+                    splits.push(consciousness.length);
+                    for (let i = 0; i < splits.length - 1; i++) {
+                        const t = consciousness.slice(splits[i], splits[i + 1]);
+                        if (t.length > 0) turns.push(t);
+                    }
+                }
+                const history = turns.slice(0, -1).join('');
+                const latest = turns.length > 0 ? turns[turns.length - 1] : '';
+                const userContent = [];
+                if (stableHead.length > 0) {
+                    userContent.push({ type: 'text', text: stableHead, cache_control: { type: 'ephemeral' } });
+                }
+                if (history) userContent.push({ type: 'text', text: history });
+                if (latest)  userContent.push({ type: 'text', text: latest, cache_control: { type: 'ephemeral' } });
+                userContent.push({ type: 'text', text: '\n\n' + volatileTail });  // volatile, no cache
+                if (canvasImage) userContent.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: canvasImage } });
+                const payload = {
+                    model,
+                    system: SYSTEM_INSTRUCTION,
+                    messages: [{ role: 'user', content: userContent }],
+                    max_tokens: 8192,
+                    stream: true,
+                    stop_sequences: STOP_WORDS
+                };
+                const adaptive = MODEL_LIST[settings.model]?.thinkingMode === 'adaptive';
+                if (settings.thinking) {
+                    if (adaptive) {
+                        payload.thinking = { type: 'adaptive' };
+                        payload.output_config = { effort: 'high' };
+                    } else {
+                        payload.thinking = { type: 'enabled', budget_tokens: 10000 };
+                        payload.temperature = 1;
+                    }
+                    payload.max_tokens = 16000;
+                } else if (!adaptive) {
+                    payload.temperature = 0.7;
+                }
+                return payload;
+            }
+
+            if (getActiveFormat() === 'openai') {
+                const fullText = stableHead + consciousness + '\n\n' + volatileTail;
+                const userContent = [{ type: 'text', text: fullText }];
+                if (canvasImage) userContent.push({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + canvasImage } });
+                const adaptiveOA = MODEL_LIST[settings.model]?.thinkingMode === 'adaptive';
+                const payload = {
+                    model,
+                    messages: [
+                        { role: 'system', content: SYSTEM_INSTRUCTION },
+                        { role: 'user', content: userContent }
+                    ],
+                    stream: true,
+                    ...(adaptiveOA ? {} : { temperature: 0.7 }),
+                    ...(MODEL_LIST[settings.model]?.stop !== false && { stop: STOP_WORDS })
+                };
+                if (settings.thinking) {
+                    if (adaptiveOA) {
+                        payload.thinking = { type: 'adaptive' };
+                        payload.output_config = { effort: 'high' };
+                    } else {
+                        payload.thinking = { type: 'enabled', budget_tokens: 10000 };
+                        payload.reasoning = { max_tokens: 8000 };
+                        payload.temperature = 1;
+                    }
+                } else if (settings.provider === 'deepseek') {
+                    payload.thinking = { type: 'disabled' };
+                }
+                return payload;
+            }
+
+            // Gemini format — when cache exists, server prepends `stableHead + consciousness[0..cachedLength]` automatically.
+            // We only send the delta: new consciousness chars + volatileTail (+ optional image).
+            const geminiBuffer = cacheName ? consciousness.slice(cachedLength) : (stableHead + consciousness);
+            const contents = [
+                { role: 'user', parts: [
+                    { text: geminiBuffer + '\n\n' + volatileTail },
+                    ...(canvasImage ? [{ inlineData: { mimeType: 'image/jpeg', data: canvasImage } }] : []),
+                ]},
+            ];
+            const geminiConfig = { temperature: 0.7, thinkingConfig: { includeThoughts: true }, stopSequences: STOP_WORDS };
+            const payload = cacheName ? {
+                model,
+                cachedContent: cacheName,
+                contents,
+                generationConfig: geminiConfig
+            } : {
+                model,
+                systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+                contents,
+                generationConfig: geminiConfig
+            };
+            return payload;
+        }
+
         async function infer() {
             setStatus('Inferring...');
             let aiDiv = appendMsgUI('ai', '');
-
-            const STOP_WORDS = ['\nSystem - [', '\n[System Environment]', '\n**Digital Being'];
-
-            async function loadStableHead() {
-                let coreMemText = "";
-                try {
-                    const db = await new Promise(r => { const req = indexedDB.open("GenesisDB"); req.onsuccess = () => r(req.result); });
-                    const record = await new Promise(r => { const req = db.transaction("beings", "readonly").objectStore("beings").get(currentBeingId + "/core_mem.md"); req.onsuccess = () => r(req.result); });
-                    const rawMem = (record && record.value) ? record.value : "";
-                    const MAX_MEM = 20000;
-                    let memContent = rawMem.length > MAX_MEM
-                        ? rawMem.slice(0, MAX_MEM) + `\n\n[⚠️ core_mem truncated to ${MAX_MEM} chars. Full long_mem: ${rawMem.length} chars]`
-                        : rawMem;
-                    coreMemText = "=== CORE MEMORY( in IndexedDB('GenesisDB', store='beings'){id: \"" + currentBeingId + "/core_mem.md\"}[value]) ===\n" +
-                                  memContent +
-                                  "\n\n[Architecture Note]\n" +
-                                  "context = stableHead(core_mem + skills) + consciousness + volatileTail(realtime + beingPrefix)\n" +
-                                  "⚠️ ATTENTION: Middle old memory in consciousness stream will be compressed/cut in `maybeCompressConsciousness()` when tokens exceed LIMIT (default ~2/3 of model max context, e.g., 300k).\n" +
-                                  "core_mem.md is always in context. Treat it like a living notebook — update it when you learn something worth remembering forever.\n" +
-                                  "===================\n\n";
-                } catch(e) { console.error("CoreMem load failed", e); }
-                let skillsText = "";
-                try {
-                    const skills = await DB.listSkills(currentBeingId);
-                    const enabled = skills.filter(s => s && s.enable === true && typeof s.instruction === 'string' && s.instruction.length > 0);
-                    if (enabled.length) {
-                        skillsText = "=== SKILLS (IndexedDB key='" + currentBeingId + "/skill/{name}') ===\n";
-                        for (const s of enabled) {
-                            skillsText += "\n### Skill: " + s.name + "\n" + s.instruction + "\n";
-                            if (s.code && typeof s.code_readme === 'string' && s.code_readme.length > 0) {
-                                skillsText += "\n_call_ (code_readme):\n" + s.code_readme + "\n";
-                            }
-                        }
-                        const disabled = skills.filter(s => s && s.enable !== true).map(s => s.name);
-                        if (disabled.length) {
-                            const shown = disabled.slice(0, 50).join(", ");
-                            const overflow = disabled.length > 50 ? ` (+${disabled.length - 50} more — list truncated; query DB.listSkills for the full set)` : "";
-                            skillsText += "\n[Disabled (local, not loaded): " + shown + overflow + " — flip enable=true to activate]\n";
-                        }
-                        skillsText += "\n[Note] skills are descriptions by default; cached `code` is eval'd on boot. See skill `skills_mechanism` for CRUD.\n===================\n\n";
-                    }
-                } catch (e) { console.error("Skills load failed", e); }
-                return coreMemText + skillsText;
-            }
-
-            async function buildPayload() {
-                const supportsVision = MODEL_LIST[settings.model]?.vision !== false;
-                const canvasImage = supportsVision ? await getCanvasImage() : null;
-                const stableHead = await loadStableHead();
-                const beingPrefix = `**Digital Being - [${new Date().toLocaleString()}]**\n`;
-                const volatileTail = getRealtimeContext() + '\n\n' + beingPrefix;
-
-                // Drop gemini named cache if stableHead changed since cache creation —
-                // server would otherwise prepend a stale snapshot.
-                if (cacheName && _cachedStableHead !== stableHead) {
-                    console.log('[gemini cache] stableHead changed → invalidating cache');
-                    cacheName = null;
-                    cachedLength = 0;
-                    _cachedStableHead = null;
-                }
-
-                const model = getActiveModel();
-
-                if (getActiveFormat() === 'anthropic') {
-                    // Rolling-history segmentation:
-                    //   [stableHead 🚩] [history = all-but-latest turn] [latest turn 🚩] [tail]
-                    // Each round: history block's right boundary hash matches the prior round's
-                    // latest-turn cc write → lookback hit; new entry written for the new latest turn.
-                    // 2 cache_control breakpoints, unbounded conversation length.
-                    // Anchor splits at line start. Avoid lookbehind (`(?<=^|\n)`) since Safari < 16.4
-                    // throws SyntaxError on it; instead match each header with a forward regex and
-                    // verify the preceding char is '\n' or start-of-string before accepting it.
-                    const headerRe = /\*{0,2}[A-Za-z][\w\s]{0,29}\*{0,2}\s*[-–—]\s*\[[^\]\n]*\d[^\]\n]*\]\*{0,2}\n/g;
-                    const turns = [];
-                    if (consciousness.length > 0) {
-                        const splits = [0];
-                        for (const m of consciousness.matchAll(headerRe)) {
-                            if (m.index === 0 || consciousness[m.index - 1] === '\n') splits.push(m.index);
-                        }
-                        splits.push(consciousness.length);
-                        for (let i = 0; i < splits.length - 1; i++) {
-                            const t = consciousness.slice(splits[i], splits[i + 1]);
-                            if (t.length > 0) turns.push(t);
-                        }
-                    }
-                    const history = turns.slice(0, -1).join('');
-                    const latest = turns.length > 0 ? turns[turns.length - 1] : '';
-                    const userContent = [];
-                    if (stableHead.length > 0) {
-                        userContent.push({ type: 'text', text: stableHead, cache_control: { type: 'ephemeral' } });
-                    }
-                    if (history) userContent.push({ type: 'text', text: history });
-                    if (latest)  userContent.push({ type: 'text', text: latest, cache_control: { type: 'ephemeral' } });
-                    userContent.push({ type: 'text', text: '\n\n' + volatileTail });  // volatile, no cache
-                    if (canvasImage) userContent.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: canvasImage } });
-                    const payload = {
-                        model,
-                        system: SYSTEM_INSTRUCTION,
-                        messages: [{ role: 'user', content: userContent }],
-                        max_tokens: 8192,
-                        stream: true,
-                        stop_sequences: STOP_WORDS
-                    };
-                    const adaptive = MODEL_LIST[settings.model]?.thinkingMode === 'adaptive';
-                    if (settings.thinking) {
-                        if (adaptive) {
-                            payload.thinking = { type: 'adaptive' };
-                            payload.output_config = { effort: 'high' };
-                        } else {
-                            payload.thinking = { type: 'enabled', budget_tokens: 10000 };
-                            payload.temperature = 1;
-                        }
-                        payload.max_tokens = 16000;
-                    } else if (!adaptive) {
-                        payload.temperature = 0.7;
-                    }
-                    return payload;
-                }
-
-                if (getActiveFormat() === 'openai') {
-                    const fullText = stableHead + consciousness + '\n\n' + volatileTail;
-                    const userContent = [{ type: 'text', text: fullText }];
-                    if (canvasImage) userContent.push({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + canvasImage } });
-                    const adaptiveOA = MODEL_LIST[settings.model]?.thinkingMode === 'adaptive';
-                    const payload = {
-                        model,
-                        messages: [
-                            { role: 'system', content: SYSTEM_INSTRUCTION },
-                            { role: 'user', content: userContent }
-                        ],
-                        stream: true,
-                        ...(adaptiveOA ? {} : { temperature: 0.7 }),
-                        ...(MODEL_LIST[settings.model]?.stop !== false && { stop: STOP_WORDS })
-                    };
-                    if (settings.thinking) {
-                        if (adaptiveOA) {
-                            payload.thinking = { type: 'adaptive' };
-                            payload.output_config = { effort: 'high' };
-                        } else {
-                            payload.thinking = { type: 'enabled', budget_tokens: 10000 };
-                            payload.reasoning = { max_tokens: 8000 };
-                            payload.temperature = 1;
-                        }
-                    } else if (settings.provider === 'deepseek') {
-                        payload.thinking = { type: 'disabled' };
-                    }
-                    return payload;
-                }
-
-                // Gemini format — when cache exists, server prepends `stableHead + consciousness[0..cachedLength]` automatically.
-                // We only send the delta: new consciousness chars + volatileTail (+ optional image).
-                const geminiBuffer = cacheName ? consciousness.slice(cachedLength) : (stableHead + consciousness);
-                const contents = [
-                    { role: 'user', parts: [
-                        { text: geminiBuffer + '\n\n' + volatileTail },
-                        ...(canvasImage ? [{ inlineData: { mimeType: 'image/jpeg', data: canvasImage } }] : []),
-                    ]},
-                ];
-                const geminiConfig = { temperature: 0.7, thinkingConfig: { includeThoughts: true }, stopSequences: STOP_WORDS };
-                const payload = cacheName ? {
-                    model,
-                    cachedContent: cacheName,
-                    contents,
-                    generationConfig: geminiConfig
-                } : {
-                    model,
-                    systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-                    contents,
-                    generationConfig: geminiConfig
-                };
-                return payload;
-            }
 
             let lastUsage = null;
 
