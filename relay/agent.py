@@ -641,15 +641,17 @@ class GenesisWorker:
             out.append({'name': v.get('id') or fn[:-5], 'instruction': instruction})
         return out
 
+    _HEADER_RE = re.compile(r'\*{0,2}[A-Za-z][\w\s]{0,29}\*{0,2}\s*[-–—]\s*\[[^\]\n]*\d[^\]\n]*\]\*{0,2}\n')
+
     def _build_payload(self, fmt, model, system_prompt, thinking):
-        # Inject [Realtime] dynamically into the prompt (not persisted)
+        # context = stableHead(core_mem + skills) + consciousness + volatileTail(realtime + beingPrefix)
         realtime = getattr(self, '_last_realtime', '')
         cm = self._read_core_mem()
         core_mem_text = (f"=== CORE MEMORY( in {os.path.join(INFERO_DIR, 'beings', self.being_id, 'core_mem.md')}) ===\n" + cm +
                          "\n\n[Architecture Note]\n"
-                         "context = SYS + first 10% ctx_old + last 60% old + core_mem + realtime\n"
-                         "⚠️ ATTENTION: Middle old memory in consciousness stream will be compressed/cut in maybeCompressConsciousness() when tokens exceed LIMIT (default ~2/3 of model max context, e.g., 300k). \n"
-                         "core_mem.md is always in context. Treat it like a living notebook — update it when you learn something worth remembering forever.\n"
+                         "context = stableHead(core_mem + skills) + consciousness + volatileTail(realtime + beingPrefix)\n"
+                         "⚠️ Middle of consciousness gets compressed in maybeCompressConsciousness() when tokens exceed LIMIT (~2/3 of model max).\n"
+                         "core_mem.md is always in context — treat it like a living notebook.\n"
                          "===================\n\n") if cm else ""
         skills = self._read_skills()
         skills_text = ""
@@ -659,30 +661,40 @@ class GenesisWorker:
             for s in skills:
                 skills_text += f"\n### Skill: {s['name']}\n{s['instruction']}\n"
             skills_text += "\n[Note] skills are descriptions; `code` may be a string (single-runtime) or `{js, shell, python}` (per-runtime). On this host (server, agent.py) only `shell` is auto-eval'd at boot. Rewrite as needed. See skill `skills_mechanism`.\n===================\n\n"
+        stable_head = core_mem_text + skills_text
         being_prefix = f"**Digital Being - [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]**\n"
-        consciousness = self.consciousness + core_mem_text + skills_text + (realtime + '\n\n' if realtime else '') + being_prefix
+        volatile_tail = (realtime + '\n\n' if realtime else '') + being_prefix
+        history_text = self.consciousness
         stop = ['\nSystem - [', '\n[System Environment]']
 
         if fmt == 'anthropic':
-            # Cache breakpoints: split consciousness at token-aligned positions
-            full_text = consciousness
-            cpt = round(len(full_text) / self._last_prompt_tokens) if self._last_prompt_tokens > 0 else 4
-            total_tokens = len(full_text) // cpt
-            levels = [140000, 50000, 20000, 10000]
-            cuts = []
-            for grain in levels:
-                aligned = (total_tokens // grain) * grain
-                if aligned > 0:
-                    cuts.append(aligned * cpt)
-            unique_cuts = sorted(set(cuts))
-            unique_cuts = [c for c in unique_cuts if c < len(full_text)][:4]
+            # Rolling-history segmentation:
+            #   [stableHead 🚩] [history = all-but-latest turn] [latest turn 🚩] [tail]
+            # The history block's right boundary hash matches the prior round's latest-turn cc
+            # → lookback hit; new entry written for the new latest turn.
+            # 2 cache_control breakpoints, unbounded conversation length.
+            turns = []
+            if history_text:
+                splits = [0]
+                for m in self._HEADER_RE.finditer(history_text):
+                    if m.start() == 0 or history_text[m.start() - 1] == '\n':
+                        splits.append(m.start())
+                splits.append(len(history_text))
+                for i in range(len(splits) - 1):
+                    t = history_text[splits[i]:splits[i + 1]]
+                    if t:
+                        turns.append(t)
+            history = ''.join(turns[:-1]) if len(turns) > 1 else ''
+            latest = turns[-1] if turns else ''
+
             user_content = []
-            pos = 0
-            for cut in unique_cuts:
-                if cut > pos:
-                    user_content.append({'type': 'text', 'text': full_text[pos:cut], 'cache_control': {'type': 'ephemeral'}})
-                    pos = cut
-            user_content.append({'type': 'text', 'text': full_text[pos:]})
+            if stable_head:
+                user_content.append({'type': 'text', 'text': stable_head, 'cache_control': {'type': 'ephemeral'}})
+            if history:
+                user_content.append({'type': 'text', 'text': history})
+            if latest:
+                user_content.append({'type': 'text', 'text': latest, 'cache_control': {'type': 'ephemeral'}})
+            user_content.append({'type': 'text', 'text': '\n\n' + volatile_tail})
 
             payload = {
                 'model': model,
@@ -701,31 +713,30 @@ class GenesisWorker:
             return payload
 
         if fmt == 'openai':
-            payload = {
+            full_text = stable_head + history_text + '\n\n' + volatile_tail
+            return {
                 'model': model,
                 'messages': [
                     {'role': 'system', 'content': system_prompt},
-                    {'role': 'user', 'content': [{'type': 'text', 'text': consciousness}]}
+                    {'role': 'user', 'content': [{'type': 'text', 'text': full_text}]}
                 ],
                 'stream': True,
-                'temperature': 0.7,
+                'temperature': 1 if thinking else 0.7,
                 'stop': stop
             }
-            if thinking:
-                payload['temperature'] = 1
-            return payload
 
-        # gemini
+        # gemini — when cache exists, server prepends stableHead + consciousness[0..cachedLength].
+        # We only send the delta: new consciousness chars + volatile_tail.
         cache_name = self.metadata.get('cacheName')
         cached_length = self.metadata.get('cachedLength', 0)
-        buffer_text = consciousness[cached_length:] if cache_name else consciousness
-        self._log(f"[{ts()}] [cache] cacheName={cache_name} cachedLength={cached_length} consciousness={len(consciousness)} bufferText={len(buffer_text)}")
+        gemini_buffer = history_text[cached_length:] if cache_name else (stable_head + history_text)
+        self._log(f"[{ts()}] [cache] cacheName={cache_name} cachedLength={cached_length} history={len(history_text)} buffer={len(gemini_buffer)}")
         gemini_config = {
             'temperature': 0.7,
             'thinkingConfig': {'includeThoughts': True},
             'stopSequences': stop
         }
-        contents = [{'role': 'user', 'parts': [{'text': buffer_text}]}]
+        contents = [{'role': 'user', 'parts': [{'text': gemini_buffer + '\n\n' + volatile_tail}]}]
         is_infero = bool(self.llm_settings.get('client_id'))
         if cache_name:
             payload = {
@@ -740,7 +751,7 @@ class GenesisWorker:
                 'generationConfig': gemini_config
             }
         if is_infero:
-            payload['model'] = model  # infero relay pops this and uses it in URL
+            payload['model'] = model
         return payload
 
     async def _maybe_refresh_cache(self, usage, force=False):
