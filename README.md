@@ -2,6 +2,8 @@
 
 Self-Reference Digital Being Vessel & Network.
 
+![A receptionist Being on dev.infero.net building its own reception hall via /exec browser.](docs/screenshot.jpeg)
+
 A Being's identity, consciousness, and skills live with the Being — in a browser's IndexedDB, on a device's filesystem, wherever its vessel runs. Vessels can hand off to each other; relays and hub are optional plumbing for discovery and skill sharing.
 
 > Philosophy and theory live at [infero-net/principle](https://github.com/infero-net/principle). This repo is the code.
