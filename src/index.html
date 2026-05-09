@@ -2164,21 +2164,18 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             if (!file) return;
             try {
                 const { sourceId, records } = JSON.parse(await file.text());
-                const newId = 'being_import_' + Date.now();
-                for (const r of records) {
-                    await DB.put({ ...r, id: r.id.replace(/^being_[^/]+/, newId) });
+                if (!sourceId || !Array.isArray(records)) throw new Error('not a valid being export');
+                const existing = await DB.get(sourceId);
+                if (existing && !confirm(`Being ${sourceId.slice(0,12)}… already exists locally. Overwrite?`)) {
+                    event.target.value = '';
+                    return;
                 }
-                // Append fork note to consciousness
-                const consKey = `${newId}/consciousness.txt`;
-                const consRecord = await DB.get(consKey);
-                if (consRecord) {
-                    const note = `\n\n[System] Being imported from ${sourceId} → ${newId} at ${new Date().toLocaleString()}\n\n`;
-                    await DB.put({ id: consKey, value: (consRecord.value || consRecord.text || '') + note });
-                }
-                currentBeingId = newId;
-                await switchBeing(newId);
+                for (const r of records) await DB.put(r);
+                currentBeingId = sourceId;
+                await switchBeing(sourceId);
             } catch(e) {
-                alert("Failed to import being.");
+                console.error('[importBeing]', e);
+                alert(`Failed to import being: ${e.message}`);
             }
             event.target.value = '';
         }
