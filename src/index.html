@@ -1633,8 +1633,12 @@ Base URL is taken from window.HUB_BASE:
 
 UI: results render at #canvas-container > #html-div > #hub-overlay-search.`,
             code: `(() => {
-    const isLocal = /^(localhost|127\\.|\\[::1\\])/.test(location.hostname);
-    window.HUB_BASE = localStorage.HUB_BASE || (isLocal ? 'http://localhost:8089/hub' : location.origin + '/hub');
+    const isLocalHost = /^(localhost|127\\.|\\[::1\\])/.test(location.hostname);
+    const isFile = location.protocol === 'file:';
+    window.HUB_BASE = localStorage.HUB_BASE
+        || (isFile ? 'https://dev.infero.net/hub'
+        : isLocalHost ? 'http://localhost:8089/hub'
+        : location.origin + '/hub');
 })();
 window.hubSearch = async (query, sort, opts) => {
     opts = opts || {};
