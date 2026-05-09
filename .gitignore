@@ -28,7 +28,7 @@ Desktop.ini
 drafts/
 
 # Local Workspaces
-prototype/workspaces/
+archive/prototype/workspaces/
 DEPLOY.md
 
 # Python
@@ -42,14 +42,21 @@ venv/
 .env
 .env.*
 !.env.example
-prototype/device_relay/device_id
-prototype/device_relay/tokens.json
-prototype/pob_server/cache_state.json
-prototype/*/consciousness.txt
-prototype/hub_server/hub.db
-prototype/hub_server/hub.db-*
+relay/device_id
+relay/tokens.json
+archive/prototype/pob_server/cache_state.json
+archive/prototype/*/consciousness.txt
+hub/hub.db
+hub/hub.db-*
 
 # Test/debug artifacts
 .playwright-mcp/
 *.bak
 PENDING_COMMIT.md
+
+# Claude Code session state
+.claude/
+
+# Being-local state
+src/core_mem.md
+src/hub.json
