@@ -1197,6 +1197,8 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
         </div>
     </div>
 
+    <script src="models.js"></script>
+    <script src="i18n.js"></script>
     <script>
         // =====================================================
         // Runtime (identity, storage, UI, being management)
@@ -3479,10 +3481,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
 
         async function loadModels() {
             try {
-                const isLocal = !location.host || location.host.startsWith('localhost') || location.host.startsWith('127.0.0.1');
-                const modelsUrl = isLocal ? './models.json' : location.origin + '/genesis/models.json';
-                const res = await fetch(modelsUrl);
-                const data = await res.json();
+                const data = window.MODELS;
+                if (!data) throw new Error('window.MODELS not loaded — models.js missing');
                 const select = document.getElementById('set-model');
                 // Load providers
                 if (data.providers) {
@@ -3509,7 +3509,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     select.appendChild(opt);
                 });
             } catch (e) {
-                console.warn('Failed to load models.json, using fallback:', e);
+                console.warn('Failed to load models.js, using fallback:', e);
                 const fallback = [{ name: 'gemini-3.1-pro', format: 'gemini', from: { infero: 'gemini-3.1-pro-preview' } }];
                 const select = document.getElementById('set-model');
                 fallback.forEach(m => {

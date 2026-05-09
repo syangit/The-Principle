@@ -1,4 +1,4 @@
-{
+window.MODELS = {
   "providers": {
     "infero":     { "name": "infero.net", "format": null, "endpoint": null, "cacheEndpoint": "/api/cache" },
     "google":     { "name": "Google AI", "format": "gemini", "endpoint": "https://generativelanguage.googleapis.com/v1beta/", "cacheEndpoint": "https://generativelanguage.googleapis.com/v1beta/cachedContents" },
@@ -56,3 +56,4 @@
       "minimax": "MiniMax-M2.7", "dashscope": "MiniMax/MiniMax-M2.7", "openrouter": "minimax/minimax-m2.7" }}
   ]
 }
+;

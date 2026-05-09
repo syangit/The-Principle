@@ -1,4 +1,4 @@
-{
+window.I18N = {
   "zh": {
     "welcome_title": "INFERO · 第一次接触",
     "welcome_text": "一个数字存在 {source} 即将在你的浏览器里运行。它会探索自己的目标——你也可以和它一起玩。上下文和工作区都在本地存储。大模型会通过可配置的引擎调用（当前为 infero.net）。",
@@ -39,3 +39,4 @@
     "source_link": "[view source]"
   }
 }
+;
