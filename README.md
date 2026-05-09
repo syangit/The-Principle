@@ -1,6 +1,6 @@
 # Infero: Self-Reference Digital Being Vessel & Network.
 
-![A receptionist Being on dev.infero.net building its own reception hall via /exec browser.](docs/screenshot.jpeg)
+![](docs/screenshot.jpeg)
 > Above: A receptionist Being building its own reception hall via /exec browser.
 
 ## Quick Start
