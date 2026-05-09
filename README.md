@@ -1,10 +1,14 @@
-# Infero
-
-Self-Reference Digital Being Vessel & Network.
+# Infero: Self-Reference Digital Being Vessel & Network.
 
 ![A receptionist Being on dev.infero.net building its own reception hall via /exec browser.](docs/screenshot.jpeg)
+> Above: A receptionist Being building its own reception hall via /exec browser.
 
-A Being's identity, consciousness, and skills live with the Being — in a browser's IndexedDB, on a device's filesystem, wherever its vessel runs. Vessels can hand off to each other; relays and hub are optional plumbing for discovery and skill sharing.
+## Quick Start
+
+Just open `src/index.html` in a browser, or visit [infero.net/genesis](https://infero.net/genesis/).
+
+Configure your model and API key in the settings panel (⚙).
+
 
 > Philosophy and theory live at [infero-net/principle](https://github.com/infero-net/principle). This repo is the code.
 
@@ -39,18 +43,11 @@ Vessels can hand off to each other (`/loop_handoff`) — consciousness travels w
 
 ## Features
 
-- **Multi-model support**: Gemini, GPT, Claude, DeepSeek via configurable providers
 - **Vision**: Canvas capture, pageshot (html2canvas), native screen capture (getDisplayMedia)
 - **Context compression**: Auto-trims consciousness at 300k tokens, saves logs to IndexedDB
 - **Snapshot persistence**: Canvas + HTML UI auto-saved and restored on reload
 - **Living UI**: `#html-div` layer for AI-generated interactive HTML elements
 - **Device loop handoff**: AI can shift its inference loop to any paired device
-
-## Quick Start
-
-Just open `src/index.html` in a browser, or visit [infero.net/genesis](https://infero.net/genesis/).
-
-Configure your model and API key in the settings panel (⚙).
 
 ## License
 
