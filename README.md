@@ -39,7 +39,7 @@ Vessels can hand off to each other (`/loop_handoff`) — consciousness travels w
 **Optional infrastructure:**
 - `relay/relay.py` — WebSocket pairing service so browser and Python vessels can talk
 - `hub/hub_server.py` — skill share/install hub
-- LLM is always remote; vessels call provider APIs (Gemini, OpenAI, Anthropic, DeepSeek) directly or through a thin proxy
+- LLM is configurable; vessels call provider APIs (Gemini, OpenAI, Anthropic, DeepSeek) directly or through a thin proxy
 
 ## Features
 
