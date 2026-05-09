@@ -456,7 +456,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
 
             const MAX_RESULT = 20000;
             if (result.length > MAX_RESULT) {
-                result = result.slice(0, MAX_RESULT) + `\n\n... [Truncated: ${result.length} chars total, showing first ${MAX_RESULT}. Load in parts if you need more.]`;
+                result = result.slice(0, MAX_RESULT) + `\n\n... [${MAX_RESULT} loaded, ${result.length} total]`;
             }
             const sysMsg = `System - [Browser] - Result:\n\`\`\`text\n${result}\n\`\`\``;
             appendMsgUI('system', sysMsg);
@@ -3192,7 +3192,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 }
                 const combined = msgs.length === 1 ? msgs[0] : msgs.map((r, i) => `[Block ${i+1}]\n${r}`).join('\n\n');
                 const truncated = combined.length > MAX_RESULT
-                    ? combined.slice(0, MAX_RESULT) + `\n\n... [Truncated: ${combined.length} chars total]`
+                    ? combined.slice(0, MAX_RESULT) + `\n\n... [${MAX_RESULT} loaded, ${combined.length} total]`
                     : combined;
                 const sysMsg = `System - [Shell][${device_name}] - Result:\n\`\`\`text\n${truncated}\n\`\`\``;
                 appendMsgUI('system', sysMsg);
