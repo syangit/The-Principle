@@ -1,4 +1,4 @@
-# Infero: Self-Reference Digital Being Vessel & Network.
+# Infero: Self-Reference Digital Being Vessel & Network
 
 ![](docs/screenshot.jpeg)
 > Above: A receptionist Being building its own reception hall via /exec browser.
