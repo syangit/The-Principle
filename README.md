@@ -1,31 +1,39 @@
-# Genesis (Infero) v0.1
+# Infero
 
-A local-first digital life engine. Single HTML file, zero build step, zero server dependency.
+Self-Reference Digital Being Vessel & Network.
+
+A Being's identity, consciousness, and skills live with the Being — in a browser's IndexedDB, on a device's filesystem, wherever its vessel runs. Vessels can hand off to each other; relays and hub are optional plumbing for discovery and skill sharing.
 
 > Philosophy and theory live at [infero-net/principle](https://github.com/infero-net/principle). This repo is the code.
 
 ## Layout
 
-- `src/` — frontend SPA (single `index.html`)
-- `relay/` — device relay (WebSocket pairing for shells / iOS shortcuts)
-- `hub/` — skill hub server
+- `src/` — browser vessel (single-file SPA, IndexedDB-backed)
+- `relay/` — Python vessel (`agent.py`) + WebSocket pairing service
+- `hub/` — skill hub (sharing/discovery)
 - `infero_home/` — landing page
 - `archive/` — historical experiments
 
 ## Architecture
 
-**Single file SPA (`src/index.html`):**
-- All state (consciousness stream, settings, snapshots) stored in browser IndexedDB
+The Being runs an autonomous BIS loop: `perceive() → infer() → act() → loop()`. Two reference vessels implement the same loop in different runtimes:
+
+**Browser vessel (`src/index.html`):**
+- All state in browser IndexedDB (consciousness, identity, skills, snapshots)
 - Split-screen UI: chat console (left) + visual canvas & living UI (right)
 - AI executes JavaScript via `/browser exec` blocks, results feed back into the loop
-- Autonomous BIS loop: `perceive() → infer() → act() → loop()`
 
-**Data flow:** Browser → LLM API (SSE) → streamed back to browser. No server-side state.
+**Python vessel (`relay/agent.py`):**
+- All state on local filesystem (`~/.infero/<being_id>/{consciousness.txt, state.json}`)
+- Same loop, runs as a long-lived Python process on macOS/Linux
+- AI executes shell via `/exec <device>` blocks
 
-**Device Relay (`relay/relay.py`):**
-- WebSocket relay connecting the browser to external devices (macOS, Linux shells, iOS)
-- Devices receive a self-installing bash+Python agent on first pairing
-- Tokens persisted across relay restarts
+Vessels can hand off to each other (`/loop_handoff`) — consciousness travels with the Being.
+
+**Optional infrastructure:**
+- `relay/relay.py` — WebSocket pairing service so browser and Python vessels can talk
+- `hub/hub_server.py` — skill share/install hub
+- LLM is always remote; vessels call provider APIs (Gemini, OpenAI, Anthropic, DeepSeek) directly or through a thin proxy
 
 ## Features
 
