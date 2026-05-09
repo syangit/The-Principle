@@ -441,6 +441,13 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             return result;
         }
 
+        const MAX_RESULT = 20000;
+        function truncateResult(s) {
+            return s.length > MAX_RESULT
+                ? s.slice(0, MAX_RESULT) + `\n\n... [Truncated: ${s.length} chars total, showing first ${MAX_RESULT}. Load in parts if you need more.]`
+                : s;
+        }
+
         async function _execCode(B_out) {
             if (!B_out) return null;
             const text = B_out.endsWith('\n') ? B_out : B_out + '\n';
@@ -452,12 +459,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             for (const match of matches) {
                 results.push(await _runJS(match[1].trim()));
             }
-            let result = results.length === 1 ? results[0] : results.map((r, i) => `[Block ${i + 1}]\n${r}`).join('\n\n');
-
-            const MAX_RESULT = 20000;
-            if (result.length > MAX_RESULT) {
-                result = result.slice(0, MAX_RESULT) + `\n\n... [${MAX_RESULT} loaded, ${result.length} total]`;
-            }
+            const result = truncateResult(results.length === 1 ? results[0] : results.map((r, i) => `[Block ${i + 1}]\n${r}`).join('\n\n'));
             const sysMsg = `System - [Browser] - Result:\n\`\`\`text\n${result}\n\`\`\``;
             appendMsgUI('system', sysMsg);
             await appendConsciousness(sysMsg + '\n\n');
@@ -3173,7 +3175,6 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             }
 
             // Run each device's blocks serially, but different devices concurrently
-            const MAX_RESULT = 20000;
             const devicePromises = Object.entries(byDevice).map(async ([device_name, cmds]) => {
                 const msgs = [];
                 for (const cmd of cmds) {
@@ -3190,10 +3191,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     }
                     msgs.push(result);
                 }
-                const combined = msgs.length === 1 ? msgs[0] : msgs.map((r, i) => `[Block ${i+1}]\n${r}`).join('\n\n');
-                const truncated = combined.length > MAX_RESULT
-                    ? combined.slice(0, MAX_RESULT) + `\n\n... [${MAX_RESULT} loaded, ${combined.length} total]`
-                    : combined;
+                const truncated = truncateResult(msgs.length === 1 ? msgs[0] : msgs.map((r, i) => `[Block ${i+1}]\n${r}`).join('\n\n'));
                 const sysMsg = `System - [Shell][${device_name}] - Result:\n\`\`\`text\n${truncated}\n\`\`\``;
                 appendMsgUI('system', sysMsg);
                 await appendConsciousness(sysMsg + '\n\n');
