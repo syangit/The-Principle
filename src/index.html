@@ -71,9 +71,14 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
                     return loop();
                 }
             } catch (e) {
-                if (e.name === 'AbortError') return;              // user stopped, clean exit
+                if (e.name === 'AbortError' && e._kind !== 'timeout') return;  // user stopped, clean exit
                 console.error(e);
-                const errMsg = `System - [Error] ${e.message}`;
+                const label = e._kind === 'timeout' ? 'Timeout'
+                    : e._kind === 'reset' ? 'Connection Reset'
+                    : e._kind === 'unreachable' ? 'Network Unreachable'
+                    : e._kind === 'http' ? `HTTP ${e._status}`
+                    : 'Error';
+                const errMsg = `System - [${label}] ${e.message}`;
                 appendMsgUI('system', errMsg);
                 await appendConsciousness(errMsg + '\n\n');
                 currentAbortController = new AbortController();
@@ -132,21 +137,45 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
                     headers['Authorization'] = 'Bearer ' + token;
                 }
                 if (settings.provider === 'infero') headers['X-Client-ID'] = CLIENT_ID;
-                const response = await fetch(getActiveEndpoint(), {
-                    method: 'POST',
-                    headers,
-                    body,
-                    signal: abortSignal,
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+
+                // Wait-for-headers timeout (does not bound the streaming phase)
+                const HEADERS_TIMEOUT_MS = 90000;
+                let timedOut = false;
+                const timeoutId = setTimeout(() => { timedOut = true; currentAbortController.abort(); }, HEADERS_TIMEOUT_MS);
+                let streamStarted = false;
+                let response;
+                try {
+                    response = await fetch(getActiveEndpoint(), { method: 'POST', headers, body, signal: abortSignal });
+                } catch (e) {
+                    clearTimeout(timeoutId);
+                    if (timedOut) { const err = new Error(`No response in ${HEADERS_TIMEOUT_MS / 1000}s`); err._kind = 'timeout'; throw err; }
+                    if (e.name === 'AbortError') throw e;
+                    if (e.name === 'TypeError') { e._kind = 'unreachable'; }
+                    throw e;
+                }
+                clearTimeout(timeoutId);
+                if (!response.ok) {
+                    const err = new Error(`HTTP ${response.status}: ${await response.text()}`);
+                    err._kind = 'http';
+                    err._status = response.status;
+                    throw err;
+                }
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder("utf-8");
                 let aiText = "", thinkingText = "", buffer = "";
 
                 while (true) {
-                    const { done, value } = await reader.read();
+                    let chunk;
+                    try {
+                        chunk = await reader.read();
+                    } catch (e) {
+                        if (e.name === 'TypeError') { e._kind = streamStarted ? 'reset' : 'unreachable'; }
+                        throw e;
+                    }
+                    const { done, value } = chunk;
                     if (done) break;
+                    streamStarted = true;
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n');
                     buffer = lines.pop();
