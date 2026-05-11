@@ -359,12 +359,16 @@ echo " ✓ Pairing request sent"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Wait for agent to connect and print its verify words (max ~30s)
+# Wait for agent to print verify words for THIS new instance (max ~30s).
+# Match only `key:new` lines (a fresh pair) and only those added after install kicked off,
+# so previously-paired instances on this machine can't shadow the right line.
+LOG_BASELINE=0
+if [ -f "$INFERO_DIR/agent.log" ]; then LOG_BASELINE=$(wc -l < "$INFERO_DIR/agent.log"); fi
 printf "  Waiting for agent to start"
 VERIFY_LINE=""
 for _ in $(seq 1 60); do
     if [ -f "$INFERO_DIR/agent.log" ]; then
-        VERIFY_LINE=$(grep "verify:" "$INFERO_DIR/agent.log" 2>/dev/null | tail -1)
+        VERIFY_LINE=$(tail -n +$((LOG_BASELINE + 1)) "$INFERO_DIR/agent.log" 2>/dev/null | grep "key:new.*verify:" | tail -1)
         if [ -n "$VERIFY_LINE" ]; then break; fi
     fi
     printf "."
