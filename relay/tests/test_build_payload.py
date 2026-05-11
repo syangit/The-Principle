@@ -152,7 +152,7 @@ class AnthropicLayout(unittest.TestCase):
         p = w._build_payload('anthropic', 'claude-x', 'sys', False)
         self.assertNotIn('thinking', p)
         self.assertEqual(p['temperature'], 0.7)
-        self.assertEqual(p['max_tokens'], 8192)
+        self.assertEqual(p['max_tokens'], 16384)
 
     def test_realtime_lands_in_tail_uncached(self):
         w = _make_worker(
