@@ -3023,10 +3023,6 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                         return;
                     }
                     if (msg.device_os) settings.devices[device_name].os = msg.device_os;
-                    if (!wasOnline && online && settings.devices[device_name].keyB64) {
-                        const vwords = await pairVerifyWords(settings.devices[device_name].keyB64);
-                        appendMsgUI('system', `🔐 ${device_name} · Verify Words: **${vwords}**  \n${agentLogHint(device_name)}`);
-                    }
                 } else {
                     // Online but unknown device — try to recover from sessionStorage first
                     if (!window._unregisteredDevices) window._unregisteredDevices = {};
