@@ -1047,10 +1047,17 @@ async def connect_instance(cfg):
                     await ws.send(json.dumps({"type": "result", "req_id": req_id, "payload": payload}))
 
                 workers = {}  # being_id -> GenesisWorker
+                # Cache the last settings_update payload at connection scope so freshly-created
+                # workers (e.g. lazy-init on first user_input) start with the browser's current
+                # provider/model/token instead of an empty dict that falls back to defaults.
+                last_settings = {}
 
                 def get_worker(being_id):
                     if being_id and being_id not in workers:
-                        workers[being_id] = GenesisWorker(ws, cipher, iid, cfg['relay_ws'])
+                        w = GenesisWorker(ws, cipher, iid, cfg['relay_ws'])
+                        if last_settings:
+                            w.llm_settings.update(last_settings)
+                        workers[being_id] = w
                     return workers.get(being_id)
 
                 async for raw in ws:
@@ -1150,12 +1157,17 @@ async def connect_instance(cfg):
                         try:
                             content = decrypt(cipher, msg['payload'])
                             new_settings = content.get('settings', {})
+                            last_settings.update(new_settings)  # seed future get_worker() calls
                             for w in workers.values():
                                 old_model = w.llm_settings.get('model')
                                 w.llm_settings.update(new_settings)
                                 if new_settings.get('model') and new_settings['model'] != old_model:
                                     w.metadata['cacheName'] = None
                                     w.metadata['cachedLength'] = 0
+                                # Persist to disk so restart doesn't resurrect stale provider/model.
+                                if w.being_id:
+                                    try: w.save_to_disk()
+                                    except Exception: pass
                             log(cfg['relay_ws'], f"[{ts()}] [infero] settings_update: model={new_settings.get('model','?')}")
                         except Exception as e:
                             log(cfg['relay_ws'], f"[{ts()}] [infero] settings_update decrypt error: {e}")
