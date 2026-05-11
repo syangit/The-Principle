@@ -39,6 +39,7 @@ pending_pairs = {}   # code -> {browser_pub, instance_id, client_name, expires}
 browser_conns = {}   # instance_id -> list[websocket]
 device_conns  = {}   # "{instance_id}:{device_name}" -> {ws, instance_id, device_name}
 device_tokens = {}   # token -> "{instance_id}:{device_name}"
+pending_offline = {} # device_key -> asyncio.Task (cancelled when device reconnects)
 
 TOKENS_FILE = os.path.join(os.path.dirname(__file__), 'tokens.json')
 
@@ -681,6 +682,10 @@ async def ws_handler(websocket):
             device_key = f"{instance_id}:{device_name}"
             device_tokens[token] = device_key
             save_tokens()
+            # Cancel any in-flight offline broadcast for this exact key — device just came back.
+            _pending = pending_offline.pop(device_key, None)
+            if _pending and not _pending.done():
+                _pending.cancel()
             device_conns[device_key] = {
                 'ws': websocket,
                 'instance_id': instance_id,
@@ -858,24 +863,27 @@ async def ws_handler(websocket):
                 dname = info['device_name']
                 print(f"[{ts()}] [relay] Device disconnected: {dname}")
                 # Debounce: wait 8s (covers `pkill agent.py` → launchctl reload during install/update),
-                # then check if device reconnected.
-                async def _delayed_offline(iid, dn, dtype):
-                    await asyncio.sleep(8)
-                    still_online = any(
-                        v['device_name'] == dn
-                        for v in device_conns.values()
-                    )
-                    if not still_online:
-                        await broadcast_to_instance(iid, json.dumps({
-                            'type': 'device_status',
-                            'device_name': dn,
-                            'device_type': dtype,
-                            'online': False
-                        }))
-                        print(f"[{ts()}] [relay] Device offline confirmed: {dn}")
-                    else:
-                        print(f"[{ts()}] [relay] Device reconnected within 2s: {dn}")
-                asyncio.create_task(_delayed_offline(instance_id, dname, info.get('device_type', 'shell')))
+                # then check if THIS specific (instance_id, device_name) pair came back. A new
+                # device_hello cancels the task before it fires (see device_hello handler).
+                dkey = device_key
+                async def _delayed_offline(iid, dn, dtype, key):
+                    try:
+                        await asyncio.sleep(8)
+                    except asyncio.CancelledError:
+                        return
+                    if key in device_conns:
+                        print(f"[{ts()}] [relay] Device reconnected within 8s: {dn}")
+                        return
+                    await broadcast_to_instance(iid, json.dumps({
+                        'type': 'device_status',
+                        'device_name': dn,
+                        'device_type': dtype,
+                        'online': False
+                    }))
+                    print(f"[{ts()}] [relay] Device offline confirmed: {dn}")
+                pending_offline[dkey] = asyncio.create_task(
+                    _delayed_offline(instance_id, dname, info.get('device_type', 'shell'), dkey)
+                )
 
 
 async def handle_update(request):
