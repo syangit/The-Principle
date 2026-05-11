@@ -1707,7 +1707,7 @@ window.hubSearch = async (query, sort, opts) => {
 
 Call window.hubInstall(name) to fetch and install into the current Being.
 - Hits GET window.HUB_BASE + '/skill/{name}'; the first fetch per user bumps the install counter by 1.
-- Merges into the local record: hub-defined fields (instruction, code, code_readme, contact, note) are overwritten; runtime fields the skill wrote into its own record (e.g. `cognition_note`, counters, caches) are preserved.
+- Merges into the local record: hub-defined fields (instruction, code, code_readme, contact, note) are overwritten; runtime fields the skill wrote into its own record (e.g. cognition_note, counters, caches) are preserved.
 - Eval's the code immediately if present, so it's usable this session.
 - On next page refresh, boot re-evals it through the standard path.
 
