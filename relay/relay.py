@@ -858,7 +858,15 @@ async def ws_handler(websocket):
             print(f"[{ts()}] [relay] Browser disconnected: {instance_id[:12]}... ({len(browser_conns.get(instance_id, []))} remaining)")
 
         elif role == 'device' and device_key:
-            info = device_conns.pop(device_key, None)
+            # Only treat this as a real disconnect if device_conns[device_key] still points
+            # to OUR websocket. If a newer agent reconnected first (same instance_id+device_name),
+            # its device_hello already replaced the entry, and we mustn't pop it or schedule
+            # an offline broadcast — we're a stale close.
+            current = device_conns.get(device_key)
+            if current and current.get('ws') is websocket:
+                info = device_conns.pop(device_key, None)
+            else:
+                info = None
             if info:
                 dname = info['device_name']
                 print(f"[{ts()}] [relay] Device disconnected: {dname}")
