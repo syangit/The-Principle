@@ -99,6 +99,23 @@ def decrypt(cipher, b64):
     raw = base64.b64decode(b64)
     return json.loads(cipher.decrypt(raw[:12], raw[12:], None))
 
+async def run_shell_detached(cmd, timeout=30):
+    """Run a shell command, returning {stdout, stderr, exit_code}.
+    On timeout the process is left running in its own session (not killed);
+    exit_code is the string 'running' and stderr notes the detach."""
+    proc = await asyncio.create_subprocess_shell(
+        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        start_new_session=True)  # isolate process group so it survives timeout
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return {'stdout': stdout.decode(errors='replace'),
+                'stderr': stderr.decode(errors='replace'),
+                'exit_code': proc.returncode}
+    except asyncio.TimeoutError:
+        return {'stdout': '',
+                'stderr': f"[still running after {timeout}s — process detached, loop advances. Write output to a file if you need it.]",
+                'exit_code': 'running'}
+
 # ─── Genesis Worker: distributed loop ─────────────────────────────────────────
 
 class GenesisWorker:
@@ -857,18 +874,11 @@ class GenesisWorker:
     async def _exec_local_shell(self, cmd):
         self._log(f"[{ts()}] [infero] shell exec (local): {cmd[:60]}")
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                start_new_session=True)  # isolate process group
-            try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-                out = ''
-                if stdout: out += f"[stdout]\n{stdout.decode()}"
-                if stderr: out += f"[stderr]\n{stderr.decode()}"
-                out += f"[exit_code] {proc.returncode}"
-            except asyncio.TimeoutError:
-                self._log(f"[{ts()}] [infero] shell exec timeout (30s), process keeps running")
-                out = "[still running after 30s — advancing to next loop. Write output to file if needed.]\n[exit_code] running"
+            r = await run_shell_detached(cmd)
+            out = ''
+            if r['stdout']: out += f"[stdout]\n{r['stdout']}"
+            if r['stderr']: out += f"[stderr]\n{r['stderr']}"
+            out += f"[exit_code] {r['exit_code']}"
         except Exception as e:
             out = f"[Shell Error]\n{e}"
         sysMsg = f"System - [Shell][{DEVICE_NAME}] - Result:\n```text\n{out.strip()}\n```\n\n"
@@ -1000,17 +1010,8 @@ async def connect_instance(cfg):
                     try:
                         cmd = decrypt(cipher, payload_raw)['cmd']
                         log(cfg['relay_ws'], f"[{ts()}] [infero] exec ({iid}): {cmd[:60]}")
-                        proc = await asyncio.create_subprocess_shell(
-                            cmd,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
-                        )
-                        try:
-                            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-                            payload = encrypt(cipher, {"stdout": stdout.decode(), "stderr": stderr.decode(), "exit_code": proc.returncode})
-                        except asyncio.TimeoutError:
-                            proc.kill()
-                            payload = encrypt(cipher, {"stdout": "", "stderr": "Timed out (30s)", "exit_code": -1})
+                        r = await run_shell_detached(cmd)
+                        payload = encrypt(cipher, r)
                     except Exception as e:
                         payload = encrypt(cipher, {"stdout": "", "stderr": str(e), "exit_code": -1})
                     await ws.send(json.dumps({"type": "result", "req_id": req_id, "payload": payload}))
