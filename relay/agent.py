@@ -86,7 +86,7 @@ async def _load_bip39(relay_http):
     if _BIP39:
         return
     try:
-        async with aiohttp.ClientSession() as s:
+        async with aiohttp.ClientSession(trust_env=True) as s:
             async with s.get(f'{relay_http}/bip39', timeout=aiohttp.ClientTimeout(total=5)) as r:
                 if r.status == 200:
                     _BIP39 = (await r.text()).split()
@@ -825,7 +825,7 @@ class GenesisWorker:
         if cache_name and buffer_tokens < CACHE_REFRESH:
             try:
                 patch_url = f"{cache_base}/{cache_name}?updateMask=ttl" if is_infero else f"{cache_base}/{cache_name}?updateMask=ttl&key={api_token}"
-                async with aiohttp.ClientSession() as s:
+                async with aiohttp.ClientSession(trust_env=True) as s:
                     async with s.patch(patch_url, headers=headers, json={'ttl': '3600s'}) as r:
                         pass
             except Exception:
@@ -846,7 +846,7 @@ class GenesisWorker:
             cache_url = cache_base if is_infero else f"{cache_base}?key={api_token}"
             old_cache_name = cache_name
 
-            async with aiohttp.ClientSession() as s:
+            async with aiohttp.ClientSession(trust_env=True) as s:
                 async with s.post(cache_url, headers=headers, json=payload) as r:
                     if r.status != 200:
                         self._log(f"[{ts()}] [cache] Creation failed: {r.status}")
@@ -862,7 +862,7 @@ class GenesisWorker:
                 try:
                     del_url = f"{cache_base}/{old_cache_name}" if is_infero else f"{cache_base}/{old_cache_name}?key={api_token}"
                     del_headers = {'X-Client-ID': client_id, 'Authorization': f'Bearer {api_token}'} if is_infero else {}
-                    async with aiohttp.ClientSession() as s:
+                    async with aiohttp.ClientSession(trust_env=True) as s:
                         async with s.delete(del_url, headers=del_headers) as r:
                             pass
                 except Exception:
