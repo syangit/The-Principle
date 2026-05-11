@@ -372,7 +372,8 @@ for _ in $(seq 1 60); do
 done
 echo ""
 if [ -n "$VERIFY_LINE" ]; then
-    echo "  $VERIFY_LINE"
+    VERIFY_WORDS="${VERIFY_LINE##*verify: }"
+    printf "  Verify Words: \033[1;33m%s\033[0m\n" "$VERIFY_WORDS"
     echo "  (must match the Verify Words shown in your browser)"
 else
     echo "  ⚠  Agent didn't report verify words within 30s. Check the log:"
