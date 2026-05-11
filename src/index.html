@@ -1145,7 +1145,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             </div>
             <div id="pair-relay-row" style="display:none;align-items:center;gap:6px;margin-bottom:12px">
                 <span style="color:var(--text-dim);font-size:0.62rem;letter-spacing:0.5px;text-transform:uppercase;white-space:nowrap">Device Relay</span>
-                <input type="text" id="pair-relay-url" placeholder="localhost or https://relay.example.com/device-relay" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;font-family:'JetBrains Mono',monospace;font-size:0.68rem;border-radius:3px">
+                <input type="text" id="pair-relay-url" placeholder="default: dev.infero.net (or type 'localhost' / a custom URL)" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;font-family:'JetBrains Mono',monospace;font-size:0.68rem;border-radius:3px">
             </div>
             <div class="pair-cmd" id="pair-cmd-text" onclick="navigator.clipboard.writeText(this.textContent).then(()=>{this.style.borderColor='var(--accent)';setTimeout(()=>this.style.borderColor='',1400)})">Generating...</div>
             <p id="pair-status">Waiting for device to connect... (expires in 5 min)</p>
@@ -1341,7 +1341,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             vision: 'half',
             preview: false,
             thinking: true,
-            relayUrl: _isLocalHost ? 'ws://localhost:8081' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/device-relay/ws`,
+            relayUrl: _isLocalHost ? 'wss://dev.infero.net/device-relay/ws' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/device-relay/ws`,
             devices: {},
             hostDevice: 'this browser',
         };
@@ -2774,7 +2774,10 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             document.getElementById('pair-relay-row').style.display = _isLocalHost ? 'flex' : 'none';
             if (_isFirstOpen) document.getElementById('pair-relay-url').value = settings.relayHost || '';
             try {
-                const _relayHost = document.getElementById('pair-relay-url').value.trim() || 'localhost';
+                // localhost / file:// default to the dev relay so testing works without a local relay process.
+                // Override in the input field to point at a local relay (e.g. "localhost" or "http://127.0.0.1:8080").
+                const _relayHostRaw = document.getElementById('pair-relay-url').value.trim();
+                const _relayHost = _relayHostRaw || (_isLocalHost ? 'https://dev.infero.net/device-relay' : '');
                 const _relayIsUrl = _relayHost.includes('://');
                 const relayHttpUrl = _isLocalHost
                     ? (_relayIsUrl ? _relayHost.replace(/\/$/, '') : `http://${_relayHost}:8080`)
