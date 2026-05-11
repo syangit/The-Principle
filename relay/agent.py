@@ -502,7 +502,15 @@ class GenesisWorker:
                 async with session.post(url, json=payload, headers=headers) as resp:
                     self._log(f"[{ts()}] [infero] Infer HTTP {resp.status} content-type={resp.headers.get('Content-Type','?')[:40]}")
                     if resp.status >= 400:
-                        err_body = await resp.text()
+                        # ClientSession is in auto_decompress=False mode (so SSE streams pass through
+                        # untouched). Error responses still arrive gzipped — manually decompress before
+                        # decoding so the actual error message reaches the user.
+                        raw_body = await resp.read()
+                        encoding = (resp.headers.get('Content-Encoding') or '').lower()
+                        if encoding == 'gzip' or raw_body[:2] == b'\x1f\x8b':
+                            try: raw_body = gzip.decompress(raw_body)
+                            except Exception: pass
+                        err_body = raw_body.decode('utf-8', errors='replace')
                         self._log(f"\n[{ts()}] [infero] Infer HTTP {resp.status}: {err_body[:500]}")
                         # Gemini cache expired — clear cache and retry without it
                         if self.metadata.get('cacheName') and 'CachedContent' in err_body:
