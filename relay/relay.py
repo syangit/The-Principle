@@ -311,8 +311,29 @@ case ":$PATH:" in
 esac
 
 # ── Auto-start on boot ───────────────────────────────────────────────────────
+# Propagate proxy env (HTTPS_PROXY / HTTP_PROXY / ALL_PROXY / NO_PROXY) from the
+# install-time shell into the agent's process env so users behind Xray / Clash /
+# etc. don't have to configure anything extra. agent.py uses aiohttp with
+# trust_env=True, so these are honored automatically when present.
+PLIST_PROXY_XML=""
+SYSTEMD_PROXY_LINES=""
+for _v in HTTPS_PROXY HTTP_PROXY ALL_PROXY NO_PROXY https_proxy http_proxy all_proxy no_proxy; do
+    eval "_val=\$$_v"
+    if [ -n "$_val" ]; then
+        PLIST_PROXY_XML="$PLIST_PROXY_XML
+    <key>$_v</key><string>$_val</string>"
+        SYSTEMD_PROXY_LINES="${SYSTEMD_PROXY_LINES}Environment=$_v=$_val
+"
+    fi
+done
+
 if [ "$(uname -s)" = "Darwin" ]; then
     PLIST="$HOME/Library/LaunchAgents/net.${INFERO_CMD}.device.plist"
+    PLIST_ENV_BLOCK=""
+    if [ -n "$PLIST_PROXY_XML" ]; then
+        PLIST_ENV_BLOCK="  <key>EnvironmentVariables</key><dict>$PLIST_PROXY_XML
+  </dict>"
+    fi
     cat > "$PLIST" << ENDOFPLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -325,6 +346,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+$PLIST_ENV_BLOCK
   <key>StandardOutPath</key><string>$INFERO_DIR/agent.log</string>
   <key>StandardErrorPath</key><string>$INFERO_DIR/agent.log</string>
 </dict></plist>
@@ -332,6 +354,7 @@ ENDOFPLIST
     launchctl unload "$PLIST" 2>/dev/null || true
     launchctl load "$PLIST"
     echo "[infero] Auto-start registered (launchd)"
+    [ -n "$PLIST_PROXY_XML" ] && echo "[infero] Proxy env propagated to agent"
 else
     SERVICE_DIR="$HOME/.config/systemd/user"
     mkdir -p "$SERVICE_DIR"
@@ -342,7 +365,7 @@ After=network.target
 
 [Service]
 ExecStart=$VENV_DIR/bin/python3 -u $AGENT
-Restart=always
+${SYSTEMD_PROXY_LINES}Restart=always
 RestartSec=5
 
 [Install]
