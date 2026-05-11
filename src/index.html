@@ -1707,7 +1707,7 @@ window.hubSearch = async (query, sort, opts) => {
 
 Call window.hubInstall(name) to fetch and install into the current Being.
 - Hits GET window.HUB_BASE + '/skill/{name}'; the first fetch per user bumps the install counter by 1.
-- Overwrites a local skill with the same name.
+- Merges into the local record: hub-defined fields (instruction, code, code_readme, contact, note) are overwritten; runtime fields the skill wrote into its own record (e.g. `cognition_note`, counters, caches) are preserved.
 - Eval's the code immediately if present, so it's usable this session.
 - On next page refresh, boot re-evals it through the standard path.
 
@@ -1720,7 +1720,10 @@ Returns: Promise<true|false>.`,
     const key = currentBeingId + '/skill/' + s.name;
     const existing = await DB.get(key);
     const prevCode = existing && existing.value && existing.value.code;
-    await DB.put({ id: key, value: {
+    // Merge: preserve runtime fields the skill itself wrote (cognition_note, last_*, etc.);
+    // only overwrite the hub-defined fields.
+    const merged = {
+        ...(existing && existing.value ? existing.value : {}),
         id: s.name,
         instruction: s.instruction || '',
         enable: true,
@@ -1728,7 +1731,8 @@ Returns: Promise<true|false>.`,
         code_readme: s.code_readme || null,
         contact: s.contact || '',
         note: s.note || ''
-    }});
+    };
+    await DB.put({ id: key, value: merged });
     const js = window.skillJsCode ? window.skillJsCode(s.code) : (typeof s.code === 'string' ? s.code : null);
     if (js && JSON.stringify(s.code) !== JSON.stringify(prevCode)) {
         try { (0, eval)(js); console.log('[hub] installed + eval:', s.name); }
