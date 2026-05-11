@@ -302,7 +302,6 @@ class GenesisWorker:
         self.being_id = self.metadata.get('beingId', '')
         core_mem = self.metadata.get('coreMem', '')
         if core_mem and self.being_id:
-            import os
             cm_path = os.path.join(INFERO_DIR, 'beings', self.being_id, 'core_mem.md')
             os.makedirs(os.path.dirname(cm_path), exist_ok=True)
             with open(cm_path, 'w', encoding='utf-8') as f: f.write(core_mem)
