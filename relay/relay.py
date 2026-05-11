@@ -358,6 +358,19 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo " ✓ Pairing request sent"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
+
+# Wait for agent to connect and print its verify words (max ~10s)
+for _ in $(seq 1 40); do
+    if grep -m1 "verify:" "$INFERO_DIR/agent.log" 2>/dev/null | tail -1 | grep -q .; then
+        VERIFY_LINE=$(grep "verify:" "$INFERO_DIR/agent.log" | tail -1)
+        echo "  $VERIFY_LINE"
+        echo "  (must match the Verify Words shown in your browser)"
+        echo ""
+        break
+    fi
+    sleep 0.25
+done
+
 echo "  This device will auto-connect on every boot."
 echo ""
 if [ "$NEEDS_PATH" = true ]; then

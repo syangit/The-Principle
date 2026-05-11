@@ -3008,8 +3008,9 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     statusEl.textContent = `✓ ${device_name} connected!`;
                     statusEl.style.cssText = 'color:#fff;font-weight:500;font-size:0.82rem;';
                     appendMsgUI('system', `🔐 E2E encrypted · AES-256-GCM via ECDH/P-256  \nDevice: ${device_name} · Verify Words: **${vwords}**  \n${agentLogHint(device_name)}`);
-                    _pairModalCloseTimer = setTimeout(() => { _pairModalCloseTimer = null; closePairModal(); }, 2000);
                 } else if (settings.devices[device_name]) {
+                    // Known paired device — make sure it can't linger in the unregistered list
+                    if (window._unregisteredDevices) delete window._unregisteredDevices[device_name];
                     const wasOnline = settings.devices[device_name].online;
                     settings.devices[device_name].online = online;
                     if (msg.device_type) settings.devices[device_name].type = msg.device_type;
@@ -3046,15 +3047,9 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                                 appendMsgUI('system', `🔐 Pairing complete: ${device_name} · Verify Words: **${vwords}**  \n${agentLogHint(device_name)}`);
                             } catch (_e) {
                                 window._unregisteredDevices[device_name] = { type: msg.device_type || 'shell', os: msg.device_os || '' };
-                                if (msg.fresh_pair) {
-                                    appendMsgUI('system', `System - [Device] - ${device_name} pairing incomplete — device connected after the pair modal closed, so its initial key was not captured. Click **Pair** in Settings to complete pairing.`);
-                                }
                             }
                         } else {
                             window._unregisteredDevices[device_name] = { type: msg.device_type || 'shell', os: msg.device_os || '' };
-                            if (msg.fresh_pair) {
-                                appendMsgUI('system', `System - [Device] - ${device_name} pairing incomplete — device connected after the pair modal closed, so its initial key was not captured. Click **Pair** in Settings to complete pairing.`);
-                            }
                         }
                     } else {
                         delete window._unregisteredDevices[device_name];
@@ -3066,10 +3061,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 const _wasDeleted = !online && window._removedDevices?.has(device_name);
                 if (_wasDeleted) window._removedDevices.delete(device_name);
                 const note = `System - [Device] - ${device_name} ${_wasDeleted ? 'deleted' : (online ? 'is now online' : 'is now offline')}`;
-                appendMsgUI('system', note);
-                if (online && window._unregisteredDevices?.[device_name] && !msg.fresh_pair) {
-                    appendMsgUI('system', `[Device] - ${device_name} is not paired with this browser. Open Settings → click **Pair** next to it to establish an encrypted channel.`);
-                }
+                // Only emit chat noise for KNOWN paired devices; unregistered ones surface via the orange dot in Settings.
+                if (settings.devices[device_name]) appendMsgUI('system', note);
                 // Don't write device status to consciousness — reconnection noise pollutes AI context
                 // Auto takeover if core loop host went offline
                 if (!online && settings.hostDevice === device_name) {
@@ -3451,7 +3444,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     <span style="color:var(--text-dim);font-size:0.6rem;margin-right:2px">${d.online ? 'online' : 'offline'}</span>
                     ${hostIcon}${controls}
                 </div>`;
-            }).join('') + Object.keys(window._unregisteredDevices || {}).map(name =>
+            }).join('') + Object.keys(window._unregisteredDevices || {}).filter(name => !settings.devices?.[name]).map(name =>
                 `<div style="display:flex;align-items:center;gap:4px;font-size:0.62rem;padding:2px 4px;font-family:'JetBrains Mono',monospace">
                     <span style="width:7px;height:7px;border-radius:50%;margin-right:5px;flex-shrink:0;background:#e67e22;box-shadow:0 0 4px #e67e2288"></span>
                     <span style="color:var(--text-dim);flex:1">${name}</span>
