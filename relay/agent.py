@@ -717,7 +717,7 @@ class GenesisWorker:
                 'model': model,
                 'system': system_prompt,
                 'messages': [{'role': 'user', 'content': user_content}],
-                'max_tokens': 8192,
+                'max_tokens': 16384,
                 'stream': True,
                 'stop_sequences': stop
             }
