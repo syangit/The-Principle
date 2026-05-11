@@ -500,19 +500,13 @@ class GenesisWorker:
             timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=120)  # 30s connect, 120s between chunks
             # trust_env=True so HTTP_PROXY / HTTPS_PROXY / ALL_PROXY env vars are honored —
             # users behind Xray/Clash/Shadowsocks need this for Anthropic etc.
-            async with aiohttp.ClientSession(auto_decompress=False, timeout=timeout, trust_env=True) as session:
+            # auto_decompress=True is needed for Anthropic SSE (Content-Encoding: gzip on streams);
+            # Gemini SSE is uncompressed so this is a no-op for it.
+            async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
                 async with session.post(url, json=payload, headers=headers) as resp:
                     self._log(f"[{ts()}] [infero] Infer HTTP {resp.status} content-type={resp.headers.get('Content-Type','?')[:40]}")
                     if resp.status >= 400:
-                        # ClientSession is in auto_decompress=False mode (so SSE streams pass through
-                        # untouched). Error responses still arrive gzipped — manually decompress before
-                        # decoding so the actual error message reaches the user.
-                        raw_body = await resp.read()
-                        encoding = (resp.headers.get('Content-Encoding') or '').lower()
-                        if encoding == 'gzip' or raw_body[:2] == b'\x1f\x8b':
-                            try: raw_body = gzip.decompress(raw_body)
-                            except Exception: pass
-                        err_body = raw_body.decode('utf-8', errors='replace')
+                        err_body = await resp.text()
                         self._log(f"\n[{ts()}] [infero] Infer HTTP {resp.status}: {err_body[:500]}")
                         # Gemini cache expired — clear cache and retry without it
                         if self.metadata.get('cacheName') and 'CachedContent' in err_body:
