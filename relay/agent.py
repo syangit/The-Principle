@@ -498,7 +498,9 @@ class GenesisWorker:
         self._log(f"[{ts()}] [infero] Infer: {fmt} {url[:80]}")
         try:
             timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=120)  # 30s connect, 120s between chunks
-            async with aiohttp.ClientSession(auto_decompress=False, timeout=timeout) as session:
+            # trust_env=True so HTTP_PROXY / HTTPS_PROXY / ALL_PROXY env vars are honored —
+            # users behind Xray/Clash/Shadowsocks need this for Anthropic etc.
+            async with aiohttp.ClientSession(auto_decompress=False, timeout=timeout, trust_env=True) as session:
                 async with session.post(url, json=payload, headers=headers) as resp:
                     self._log(f"[{ts()}] [infero] Infer HTTP {resp.status} content-type={resp.headers.get('Content-Type','?')[:40]}")
                     if resp.status >= 400:
