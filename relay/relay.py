@@ -857,9 +857,10 @@ async def ws_handler(websocket):
             if info:
                 dname = info['device_name']
                 print(f"[{ts()}] [relay] Device disconnected: {dname}")
-                # Debounce: wait 2s, then check if device reconnected
+                # Debounce: wait 8s (covers `pkill agent.py` → launchctl reload during install/update),
+                # then check if device reconnected.
                 async def _delayed_offline(iid, dn, dtype):
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(8)
                     still_online = any(
                         v['device_name'] == dn
                         for v in device_conns.values()
