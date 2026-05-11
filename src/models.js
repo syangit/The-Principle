@@ -26,13 +26,13 @@ window.MODELS = {
       "openai": "gpt-5.4-mini", "openrouter": "openai/gpt-5.4-mini" }},
     { "name": "gpt-5.4-nano", "format": "openai", "stop": false, "from": {
       "openai": "gpt-5.4-nano", "openrouter": "openai/gpt-5.4-nano" }},
-    { "name": "claude-opus-4.7", "format": "openai", "maxContext": 1000000, "compress": { "at": 128000, "head": 0.1, "tail": 0.6 }, "thinkingMode": "adaptive", "from": {
+    { "name": "claude-opus-4.7", "format": "anthropic", "maxContext": 1000000, "compress": { "at": 128000, "head": 0.1, "tail": 0.6 }, "thinkingMode": "adaptive", "from": {
       "anthropic": "claude-opus-4-7", "openrouter": "anthropic/claude-opus-4.7" }},
-    { "name": "claude-opus-4.6", "format": "openai", "maxContext": 128000, "compress": { "at": 128000, "head": 0.1, "tail": 0.6 }, "from": {
+    { "name": "claude-opus-4.6", "format": "anthropic", "maxContext": 128000, "compress": { "at": 128000, "head": 0.1, "tail": 0.6 }, "from": {
       "anthropic": "claude-opus-4-6", "openrouter": "anthropic/claude-opus-4.6" }},
-    { "name": "claude-sonnet-4.6", "format": "openai", "from": {
+    { "name": "claude-sonnet-4.6", "format": "anthropic", "from": {
       "anthropic": "claude-sonnet-4-6", "openrouter": "anthropic/claude-sonnet-4.6" }},
-    { "name": "claude-haiku-4.5", "format": "openai", "from": {
+    { "name": "claude-haiku-4.5", "format": "anthropic", "from": {
       "anthropic": "claude-haiku-4-5-20251001", "openrouter": "anthropic/claude-haiku-4.5" }},
     { "name": "deepseek-v3.2", "format": "openai", "vision": false, "maxContext": 128000, "from": {
       "deepseek": "deepseek-chat", "openrouter": "deepseek/deepseek-v3.2" }},
