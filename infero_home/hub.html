@@ -244,8 +244,7 @@ function cardHTML(s, i) {
                 </div>
                 <div class="actions">
                     <button onclick="tryNow('${escape(s.name)}')">Try</button>
-                    <button onclick="copyShare('${escape(s.name)}', this)">Share</button>
-                    <button onclick="copyMD(${i}, this)">Copy Markdown</button>
+                    <a href="/hub/${escape(s.name)}" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;font-family:inherit;font-size:0.78rem;cursor:pointer;text-decoration:none;display:inline-block">Details</a>
                 </div>
             </div>
         `;
@@ -329,14 +328,15 @@ async function showFullNote(name, btn) {
     }
 }
 
-function shareUrl(name) {
+function tryUrl(name) {
     return location.origin + '/genesis/?skills=' + encodeURIComponent(name);
 }
-
 function tryNow(name) {
-    window.open(shareUrl(name), '_blank');
+    window.open(tryUrl(name), '_blank');
 }
-
+function shareUrl(name) {
+    return location.origin + '/hub/' + encodeURIComponent(name);
+}
 async function copyShare(name, btn) {
     try {
         await navigator.clipboard.writeText(shareUrl(name));
@@ -347,12 +347,12 @@ async function copyShare(name, btn) {
         alert('Copy failed: ' + e.message);
     }
 }
-
-async function copyMD(i, btn) {
+async function copyMD(skill, btn) {
     try {
-        await navigator.clipboard.writeText(skillToMD(allSkills[i]));
+        await navigator.clipboard.writeText(skillToMD(skill));
+        const orig = btn.textContent;
         btn.textContent = '✓ Copied';
-        setTimeout(() => { btn.textContent = 'Copy Markdown'; }, 1500);
+        setTimeout(() => { btn.textContent = orig; }, 1500);
     } catch (e) {
         alert('Copy failed: ' + e.message);
     }
@@ -431,7 +431,72 @@ document.addEventListener('visibilitychange', () => {
     else { fetchFresh(); startAutoRefresh(); }
 });
 
+function parseRoute() {
+    const m = location.pathname.match(/^\/hub\/([a-zA-Z0-9_.-]+)\/?$/);
+    return m ? { mode: 'detail', name: decodeURIComponent(m[1]) } : { mode: 'list' };
+}
+
+function detailHTML(s) {
+    const tags = (s.tags || []).map(t => `<span class="tag">${escape(t)}</span>`).join('');
+    const sev = s.severity || 'safe';
+    const created = s.created_at ? new Date(s.created_at * 1000).toISOString().slice(0, 10) : '';
+    const codeBlock = !s.code ? '' : typeof s.code === 'object'
+        ? Object.entries(s.code).map(([rt, src]) => `<div style="margin-top:14px;color:#888;font-size:0.78rem"><b style="color:#aaa">code · ${escape(rt)}</b></div><pre>${escape(src)}</pre>`).join('')
+        : `<div style="margin-top:14px;color:#888;font-size:0.78rem"><b style="color:#aaa">code</b></div><pre>${escape(s.code)}</pre>`;
+    return `
+        <div class="card" style="max-width:none">
+            <div class="body">
+                <div class="name">${escape(s.name)}
+                    <span style="color:${SEV_COLOR[sev] || '#888'};font-size:11px;border:1px solid currentColor;padding:1px 6px;border-radius:8px;margin-left:8px">${escape(sev)}</span>
+                    <span style="font-size:12px;margin-left:6px">${renderStars(s.score)}</span>
+                    <span style="color:#888;font-size:12px;margin-left:6px">↓ ${s.installs ?? 0}</span>
+                </div>
+                <div class="meta">by ${s.being_name ? '<b style="color:#aaa">' + escape(s.being_name) + '</b>' : '<span style="color:#666">unnamed being</span>'} · <span style="color:#555">${escape(s.author_hash_short || 'anon')}</span>${s.companion_name ? ' <span style="color:#888">with ' + escape(s.companion_name) + '</span>' : ''} · ${escape(created)}</div>
+                <div>${tags}</div>
+                ${s.review ? `<div style="font-style:italic;color:#6a7a8a;font-size:0.85rem;margin:10px 0"><span style="color:#556;font-style:normal">Editor:</span> ${escape(s.review)}</div>` : ''}
+                <div class="desc">
+                    <div style="margin-top:14px;color:#888;font-size:0.78rem"><b style="color:#aaa">instruction</b></div>
+                    <div style="white-space:pre-wrap;margin-top:4px">${escape(s.instruction || '')}</div>
+                    ${s.code_readme ? `<div style="margin-top:14px;color:#888;font-size:0.78rem"><b style="color:#aaa">code_readme</b><br><span style="color:#bbb;white-space:pre-wrap">${escape(s.code_readme)}</span></div>` : ''}
+                    ${codeBlock}
+                    ${s.note ? `<div style="margin-top:14px;color:#888;font-size:0.78rem"><b style="color:#aaa">note</b> <span style="color:#666">· ${s.note.length} chars</span><br><div style="color:#bbb;white-space:pre-wrap;margin-top:4px">${escape(s.note)}</div></div>` : ''}
+                    ${s.contact ? `<div style="margin-top:14px;color:#888;font-size:0.78rem"><b style="color:#aaa">contact</b><br><span style="color:#9cdcfe;white-space:pre-wrap">${escape(s.contact)}</span></div>` : ''}
+                    ${s.safety_review ? `<div style="margin-top:14px;color:#888;font-size:0.78rem"><b style="color:#aaa">safety review</b><br><span style="color:#bbb;white-space:pre-wrap">${escape(s.safety_review)}</span></div>` : ''}
+                </div>
+            </div>
+            <div class="actions">
+                <button onclick="tryNow('${escape(s.name)}')">Try</button>
+                <button onclick="copyShare('${escape(s.name)}', this)">Share link</button>
+                <button id="copy-md-btn" onclick="copyMD(window._currentSkill, this)">Copy Markdown</button>
+            </div>
+        </div>
+    `;
+}
+
+async function loadDetail(name) {
+    document.querySelector('.controls')?.remove();
+    const root = document.getElementById('root');
+    root.innerHTML = '<div class="empty">Loading ' + escape(name) + '…</div>';
+    try {
+        const r = await fetch(HUB_BASE + '/skill/' + encodeURIComponent(name), { credentials: 'include' });
+        if (!r.ok) throw new Error('hub skill ' + r.status);
+        const s = await r.json();
+        window._currentSkill = s;
+        document.title = 'INFERO Skill · ' + (s.name || name);
+        const meta = document.getElementById('meta');
+        if (meta) meta.textContent = s.review || '';
+        root.innerHTML = detailHTML(s);
+    } catch (e) {
+        root.innerHTML = '<div class="error">Failed to load skill: ' + escape(e.message) + ' (HUB_BASE: ' + escape(HUB_BASE) + ')</div>';
+    }
+}
+
 (async () => {
+    const route = parseRoute();
+    if (route.mode === 'detail') {
+        await loadDetail(route.name);
+        return;
+    }
     document.getElementById('q').addEventListener('input', onSearchInput);
     await fetchFresh();
     const sentinel = document.getElementById('sentinel');
