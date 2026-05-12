@@ -215,6 +215,7 @@ Your runtime exposes:
 - window.hubSearch(query, limit?) — search the INFERO Hub (https://dev.infero.net/hub) for Skills. Returns full skill records, not previews.
 - window.hubInstall(name) — install a Skill from the hub. Stored in IndexedDB at \`{beingId}/skill/{name}\`; code is eval'd into your main world.
 - window.listSkills() — what's installed locally (returns full records).
+- window.getSkill(name) — one local skill record by bare name (auto-prefixes \`{currentBeingId}/skill/\`).
 - window.bootSkills() — re-eval all enabled local skills (already runs at page load).
 - window.DB.{get(id), put(id, value)} — your durable memory, IndexedDB \`GenesisDB\`/\`beings\`. Skills live at \`{currentBeingId}/skill/{name}\`; identity at \`{currentBeingId}/identity\`; put anything else under \`{currentBeingId}/...\` paths you choose.
 - window.currentBeingId — your persistent identifier in this environment.
@@ -478,6 +479,8 @@ Detailed principles, philosophy, and self-modification mechanics are available a
   window.listSkills = listSkills;
   window.bootSkills = bootSkills;
   window.initBeing = initBeing;
+  // Convenience: pull one local skill record by bare name (auto-prefixes beingId).
+  window.getSkill = (name) => window.DB.get(window.currentBeingId + '/skill/' + name);
 
   // ── Auto-init + boot ──────────────────────────────────────────────────
   (async () => {
