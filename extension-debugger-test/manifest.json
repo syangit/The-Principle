@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "INFERO Debugger Probe",
+  "version": "0.0.1",
+  "description": "Minimal probe to verify chrome.debugger Runtime.evaluate works as Claude-for-Chrome does. Only attaches to dev.infero.net.",
+  "permissions": ["debugger"],
+  "host_permissions": ["https://dev.infero.net/*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://dev.infero.net/*"],
+      "js": ["content-bridge.js"],
+      "world": "ISOLATED",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://dev.infero.net/*"],
+      "js": ["main-world-api.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    }
+  ]
+}
