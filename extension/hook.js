@@ -85,14 +85,22 @@
 
   function execJsEval(code) {
     return new Promise(resolve => {
+      // Wrap in an async IIFE so top-level await works, and capture console.log
+      // for stdout reporting — same shape as the nonce path.
+      const stdout = [];
+      const _o = console.log, _e = console.error;
+      console.log = (...a) => { stdout.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); _o(...a); };
+      console.error = (...a) => { stdout.push('[err] ' + a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); _e(...a); };
       try {
-        const r = (0, eval)(code);
+        const wrapped = '(async () => {\n' + code + '\n})()';
+        const r = (0, eval)(wrapped);
         Promise.resolve(r).then(
-          () => resolve({ ok: true, stdout: '' }),
-          (err) => resolve({ ok: false, error: err.message })
+          () => { console.log = _o; console.error = _e; resolve({ ok: true, stdout: stdout.join('\n') }); },
+          (err) => { console.log = _o; console.error = _e; resolve({ ok: false, stdout: stdout.join('\n'), error: err.message }); }
         );
       } catch (e) {
-        resolve({ ok: false, error: e.message });
+        console.log = _o; console.error = _e;
+        resolve({ ok: false, stdout: stdout.join('\n'), error: e.message });
       }
     });
   }
