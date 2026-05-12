@@ -613,6 +613,8 @@ class GenesisWorker:
         await self.send_relay({'type': 'stream_token', 'sender': DEVICE_NAME,
             'payload': encrypt(self.cipher, {'text': ai_text, 'thinking': thinking_text, 'done': True, 'usage': usage, 'being_id': self.being_id})})
         self._last_prompt_tokens = usage.get('promptTokens', 0)
+        self.metadata['promptTokens'] = usage.get('promptTokens', 0)
+        self.metadata['cachedTokens'] = usage.get('cachedTokens', 0)
         await self._maybe_refresh_cache(usage)
         time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         clean_ai = re.sub(r'^\*{0,2}Digital Being\s*[-–—]\s*\[.*?\]\*{0,2}\n?', '', ai_text)
