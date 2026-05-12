@@ -347,6 +347,10 @@ Detailed principles, philosophy, and self-modification mechanics are available a
       const r = await execJsCSP(code);
       hookState.log.push({ t: now, code: code.slice(0, 80), ok: r.ok, stdout: r.stdout, error: r.error });
       console.log('[infero]', r.ok ? 'OK' : 'ERR', code.slice(0, 60), '→', r.error || r.stdout?.slice(0, 60) || '(ok)');
+      if (!r.ok && r.error) {
+        const tail = r.stdout ? '\nstdout: ' + r.stdout.slice(-500) : '';
+        window.trigger('[exec error] ' + r.error + tail);
+      }
     }
   }
 
