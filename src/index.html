@@ -553,7 +553,9 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             if (startChars + tailChars >= clean.length) return;
 
             const middle = clean.slice(startChars, clean.length - tailChars);
-            const logKey = `${prefix}${Date.now()}.txt`;
+            let ts = Date.now();
+            while (existing.some(r => r.id === `${prefix}${ts}.txt`)) ts += 1;
+            const logKey = `${prefix}${ts}.txt`;
             await DB.put({ id: logKey, text: middle });
 
             const fresh = (await DB.list())

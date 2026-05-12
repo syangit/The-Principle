@@ -1,4 +1,4 @@
-import asyncio, json, subprocess, base64, hashlib, os, sys, socket, re, gzip
+import asyncio, json, subprocess, base64, hashlib, os, sys, socket, re, gzip, time
 from datetime import datetime
 import aiohttp
 
@@ -663,6 +663,8 @@ class GenesisWorker:
 
         middle = clean[start_chars:len(clean) - tail_chars]
         ts_ms = int(time.time() * 1000)
+        while os.path.exists(os.path.join(log_dir, f'context_log_{ts_ms}.txt')):
+            ts_ms += 1  # avoid same-ms clobber on rapid repeat
         log_name = f'context_log_{ts_ms}.txt'
         try:
             with open(os.path.join(log_dir, log_name), 'w', encoding='utf-8') as f:
