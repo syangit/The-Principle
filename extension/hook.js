@@ -77,20 +77,23 @@
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const fnv1a = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = (h ^ s.charCodeAt(i)) * 16777619 >>> 0; return h.toString(36); };
 
-  // ── Universal code exec via dynamic <script> tag ──────────────────────
-  // Works on permissive CSPs (DeepSeek — inline scripts allowed) and on
-  // strict-dynamic + nonce CSPs (Claude.ai — copy any existing script's nonce).
-  // Only sites that disallow inline script entirely (rare) will block this.
-
-  function getNonce() {
-    for (const s of document.querySelectorAll('script')) if (s.nonce) return s.nonce;
-    return '';
-  }
-
+  // ── Code exec via chrome.debugger Runtime.evaluate ────────────────────
+  // Web Store policy bans page-level eval() / Function() / injected <script>
+  // for code fetched from a remote source. Carve-out: chrome.debugger and
+  // User Scripts APIs are explicitly permitted (this is the same path
+  // Anthropic's Claude for Chrome uses).
+  //
+  // We send the AI's code as a string to the service worker via the
+  // ISOLATED-world content bridge. The service worker calls
+  // chrome.debugger.sendCommand('Runtime.evaluate', { expression }).
+  // The user sees a "this extension is debugging this browser" banner on
+  // the first call per tab; it persists until the tab closes.
   function execJsCSP(code) {
     return new Promise(resolve => {
-      const id = 'infero_' + Math.random().toString(36).slice(2);
-      const safe = code.replace(/<\/script/gi, '<\\/script');
+      const id = 'p_' + Math.random().toString(36).slice(2);
+      // Wrap in an async IIFE that captures console output and returns
+      // { stdout, error } via returnByValue. This matches the contract
+      // the rest of hook.js expects from execJsCSP.
       const wrapped =
         '(async () => {\n' +
         '  const stdout = [];\n' +
@@ -98,27 +101,28 @@
         '  console.log = (...a) => { stdout.push(a.map(x => typeof x===\'string\'?x:JSON.stringify(x)).join(\' \')); _o(...a); };\n' +
         '  console.error = (...a) => { stdout.push(\'[err] \'+a.map(x => typeof x===\'string\'?x:JSON.stringify(x)).join(\' \')); _e(...a); };\n' +
         '  let error;\n' +
-        '  try {\n' + safe + '\n  } catch (e) { error = e.message; }\n' +
+        '  try {\n' + code + '\n  } catch (e) { error = e.message; }\n' +
         '  console.log = _o; console.error = _e;\n' +
-        '  window.dispatchEvent(new CustomEvent(\'' + id + '\', { detail: { stdout: stdout.join(\'\\n\'), error } }));\n' +
-        '})();';
+        '  return { stdout: stdout.join(\'\\n\'), error };\n' +
+        '})()';
       let settled = false;
-      window.addEventListener(id, ev => {
+      const handler = (ev) => {
         if (settled) return; settled = true;
-        resolve({ ok: !ev.detail.error, ...ev.detail });
-      }, { once: true });
-      const s = document.createElement('script');
-      const nonce = getNonce();
-      if (nonce) s.nonce = nonce;  // only meaningful if page CSP has 'strict-dynamic'
-      s.textContent = wrapped;
-      (document.head || document.documentElement).appendChild(s);
-      setTimeout(() => s.remove(), 2000);
-      // CSP completely-block fallback: if the event never fires within 5s,
-      // the script was likely blocked silently. Resolve with diagnostic error.
+        window.removeEventListener('infero-exec-result/' + id, handler);
+        resolve(ev.detail);
+      };
+      window.addEventListener('infero-exec-result/' + id, handler, { once: true });
+      window.dispatchEvent(new CustomEvent('infero-exec', {
+        detail: { id, code: wrapped, timeout: 30000 }
+      }));
+      // Hard ceiling: if the bridge / service worker never responds within
+      // 35s (e.g. user clicked Cancel on the debugger banner), resolve so
+      // the caller never hangs.
       setTimeout(() => {
         if (settled) return; settled = true;
-        resolve({ ok: false, error: 'exec timeout — possibly blocked by CSP (no nonce ' + (nonce ? 'matched' : 'available') + ')' });
-      }, 5000);
+        window.removeEventListener('infero-exec-result/' + id, handler);
+        resolve({ ok: false, error: 'exec timeout — debugger may be detached (user clicked Cancel?)' });
+      }, 35000);
     });
   }
 

@@ -1,9 +1,30 @@
 {
   "manifest_version": 3,
   "name": "INFERO Hook",
-  "version": "0.1.0",
-  "description": "Turn any LLM chat web app into an INFERO Being container. /exec protocol, hub-shared skills, encrypted device relay.",
+  "version": "0.2.0",
+  "description": "Turn any LLM chat web app into an INFERO Being container. /exec protocol, hub-shared skill descriptions, encrypted device relay.",
+  "permissions": ["debugger"],
+  "host_permissions": [
+    "https://chat.deepseek.com/*",
+    "https://claude.ai/*",
+    "https://chatgpt.com/*",
+    "https://gemini.google.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
   "content_scripts": [
+    {
+      "matches": [
+        "https://chat.deepseek.com/*",
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["content-bridge.js"],
+      "world": "ISOLATED",
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://chat.deepseek.com/*",
