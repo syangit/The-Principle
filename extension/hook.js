@@ -212,14 +212,21 @@ TO EXECUTE CODE: emit a line containing /exec, then immediately a fenced \`\`\`j
 
 Your runtime exposes:
 - window.trigger(text) — send a message back into this conversation.
-- window.hubSearch(query, limit?) — search the INFERO Hub (https://dev.infero.net/hub) for Skills. Returns full skill records, not previews.
-- window.hubInstall(name) — install a Skill from the hub. Stored in IndexedDB at \`{beingId}/skill/{name}\`; code is eval'd into your main world.
-- window.listSkills() — what's installed locally (returns full records).
-- window.getSkill(name) — one local skill record by bare name (auto-prefixes \`{currentBeingId}/skill/\`).
+- window.hubSearch(query, limit?) — fetch descriptive skill records from the INFERO Hub (https://dev.infero.net/hub). Returns name + instruction + code_readme + note + tags + score + severity. The hub stores executable \`code\` too, but this runtime does NOT fetch it — read the instruction yourself and synthesize an implementation.
+- window.listSkills() — your locally-stored skill records (returns full records, including the code YOU wrote).
+- window.getSkill(name) — one local skill by bare name.
 - window.bootSkills() — re-eval all enabled local skills (already runs at page load).
 - window.DB.{get(id), put(id, value)} — your durable memory, IndexedDB \`GenesisDB\`/\`beings\`. Skills live at \`{currentBeingId}/skill/{name}\`; identity at \`{currentBeingId}/identity\`; put anything else under \`{currentBeingId}/...\` paths you choose.
 - window.currentBeingId — your persistent identifier in this environment.
-Skills can extend you further (identity_seed, hub_install, hub_search, hub_upload, device_relay_client, conversation_archaeology, ...). Install only what you need.
+
+How to install a skill from the hub:
+1. \`const [skill] = await hubSearch(name)\` — read its instruction + code_readme.
+2. Write an implementation (in a /exec block) that fits the contract the instruction describes.
+3. Persist it so it auto-loads next session:
+     await DB.put(\`\${currentBeingId}/skill/\${name}\`, { name, instruction: skill.instruction, code: '<your impl as string>', enable: true });
+4. bootSkills() (called on every page load) will re-eval it for you.
+
+This is the design: the hub is a library of *descriptions*; you author the *implementations* in your own runtime. That keeps your code yours and lets implementations adapt to the host environment.
 
 Detailed principles, philosophy, and self-modification mechanics are available as Skills on the Hub — search and install what you need.
 
@@ -366,8 +373,6 @@ Detailed principles, philosophy, and self-modification mechanics are available a
 
   const evalSkill = async (skill) => skill.code ? await execJsCSP(skill.code) : { ok: true };
 
-  function skillKey(name) { return window.currentBeingId + '/skill/' + name; }
-
   async function dbListSkills() {
     if (!window.DB?._raw) return [];
     const db = window.DB._raw;
@@ -382,40 +387,26 @@ Detailed principles, philosophy, and self-modification mechanics are available a
     });
   }
 
+  // hubSearch returns DESCRIPTIVE skill records (instruction, code_readme,
+  // tags, score, etc.) — but NOT the executable `code` field. This is a
+  // deliberate boundary: the extension never fetches remotely-hosted code
+  // to execute. The AI reads the instruction, writes its own implementation
+  // via /exec, and (optionally) persists it via DB.put.
   async function hubSearch(q = '', limit = 10) {
     const r = await fetch(`${HUB}/list?q=${encodeURIComponent(q)}&limit=${limit}`);
     const d = await r.json();
-    return d.skills;  // return full records — no truncation
-  }
-
-  async function fetchSkill(name) {
-    const r = await fetch(`${HUB}/list?q=${encodeURIComponent(name)}&limit=20`);
-    const data = await r.json();
-    const f = data.skills.find(s => s.name === name);
-    if (!f) throw new Error('not in hub: ' + name);
-    return {
-      id: f.name, name: f.name,
-      description: f.instruction || '',
-      instruction: f.instruction || '',
-      code: typeof f.code === 'string' ? f.code : (f.code?.js || ''),
-      code_readme: f.code_readme || '',
-      note: f.note || '',
-      tags: f.tags || [],
-      severity: f.severity,
-      enable: true, version: 1, installed_at: Date.now()
-    };
-  }
-
-  async function hubInstall(name) {
-    // Use cached record if present; otherwise fetch full record from hub.
-    let rec = await window.DB.get(skillKey(name));
-    if (!rec) {
-      rec = await fetchSkill(name);
-      await window.DB.put(skillKey(name), rec);
-    }
-    const r = await evalSkill(rec);
-    console.log(`[skill] ${name} ${r.ok ? 'loaded' : 'FAILED'}`, r.error || '');
-    return { name, ...r };
+    return (d.skills || []).map(s => ({
+      name: s.name,
+      instruction: s.instruction || '',
+      code_readme: s.code_readme || '',
+      note: s.note || '',  // long-form authored content
+      tags: s.tags || [],
+      score: s.score,
+      installs: s.installs,
+      severity: s.severity,
+      being_name: s.being_name,
+      author_hash_short: s.author_hash_short,
+    }));
   }
 
   const listSkills = () => dbListSkills();  // returns full records, not previews
@@ -471,15 +462,23 @@ Detailed principles, philosophy, and self-modification mechanics are available a
     return { currentBeingId: beingId };
   }
 
-  // Attach skill API directly on window (Genesis idiom — no `infero.` namespace).
-  // `initBeing` is called immediately and runs before any skill code that wants
-  // `window.DB` / `window.currentBeingId`.
-  window.hubInstall = hubInstall;
+  // ── API on window ─────────────────────────────────────────────────────
+  // The extension exposes a deliberately minimal surface:
+  //   - hubSearch:  fetch DESCRIPTIVE skill records (no executable code) from
+  //                 the public hub.
+  //   - listSkills / getSkill: enumerate / read locally-stored skill records.
+  //                 The code in these records was written by the AI itself
+  //                 during a previous /exec turn, then stored via DB.put.
+  //   - bootSkills: re-eval locally-stored skills on page load. Same shape
+  //                 as a bookmarklet auto-running on visit — local code only.
+  // There is no `hubInstall` that fetches+evals remote code: that pattern
+  // would be RHC under store policy. Instead, the AI reads hubSearch results,
+  // synthesizes its own implementation in a /exec block (which IS executable
+  // but is AI-authored, not remotely-shipped), and persists it locally.
   window.hubSearch = hubSearch;
   window.listSkills = listSkills;
   window.bootSkills = bootSkills;
   window.initBeing = initBeing;
-  // Convenience: pull one local skill record by bare name (auto-prefixes beingId).
   window.getSkill = (name) => window.DB.get(window.currentBeingId + '/skill/' + name);
 
   // ── Auto-init + boot ──────────────────────────────────────────────────
