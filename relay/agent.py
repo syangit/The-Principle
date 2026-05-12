@@ -624,7 +624,12 @@ class GenesisWorker:
 
     _BRIDGE_START = '=== bridge:start ==='
     _BRIDGE_END   = '=== bridge:end ==='
-    _BRIDGE_RE = re.compile(r'\n*' + re.escape('=== bridge:start ===') + r'[\s\S]*?' + re.escape('=== bridge:end ===') + r'\n*')
+    # Strict: delimiters MUST sandwich at least one [gap <digits>: ...] line.
+    _BRIDGE_RE = re.compile(
+        r'\n*' + re.escape('=== bridge:start ===') + r'\n'
+        r'(?:\[gap \d+:[\s\S]*?\]\n)+'
+        + re.escape('=== bridge:end ===') + r'\n*'
+    )
 
     def _maybe_compress_consciousness(self):
         # Mirror of src/index.html maybeCompressConsciousness; storage is filesystem here.

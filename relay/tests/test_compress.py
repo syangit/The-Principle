@@ -142,5 +142,33 @@ class TestCompress(unittest.TestCase):
         self.assertEqual(len(gap_lines), 2)
 
 
+    def test_bridge_regex_ignores_incidental_marker_mentions(self):
+        # Test the regex directly: incidental delimiter mentions in chat (without a real
+        # [gap ...] line between them) must not match. Only real bridge blocks should strip.
+        mod = _load_agent(self.tmp)
+        GW = next(getattr(mod, n) for n in dir(mod) if isinstance(getattr(mod, n), type) and 'Worker' in n)
+        rx = GW._BRIDGE_RE
+
+        incidental = (
+            'Some chat about === bridge:start === and === bridge:end ===.\n'
+            'Being explains: between them goes a list of [gap ts: head ... tail].\n'
+        )
+        self.assertIsNone(rx.search(incidental), 'incidental mention must NOT match')
+
+        real = (
+            'prefix\n=== bridge:start ===\n'
+            '[gap 1700000000001: head text ... tail text]\n'
+            '[gap 1700000000002: a ... b]\n'
+            '=== bridge:end ===\nsuffix'
+        )
+        m = rx.search(real)
+        self.assertIsNotNone(m, 'real bridge must match')
+        # After substitution, only prefix + suffix survive (with \n\n between)
+        cleaned = rx.sub('\n\n', real)
+        self.assertIn('prefix', cleaned)
+        self.assertIn('suffix', cleaned)
+        self.assertNotIn('[gap 1700000000001', cleaned)
+
+
 if __name__ == '__main__':
     unittest.main()

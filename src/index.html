@@ -535,7 +535,9 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
 
             if (_lastPromptTokens < LIMIT) return;
 
-            const bridgeRe = new RegExp(`\\n*${BRIDGE_START}[\\s\\S]*?${BRIDGE_END}\\n*`, 'g');
+            // Strict bridge match: delimiters MUST sandwich at least one gap line. Lowers the chance
+            // that a conversation incidentally containing the delimiter string gets nuked.
+            const bridgeRe = new RegExp(`\\n*${BRIDGE_START}\\n(\\[gap \\d+:[\\s\\S]*?\\]\\n)+${BRIDGE_END}\\n*`, 'g');
             const clean = consciousness.replace(bridgeRe, '\n\n');
             const cpt = clean.length / _lastPromptTokens;
             const startChars = Math.floor(LIMIT * HEAD_FRAC * cpt);
