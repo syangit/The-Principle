@@ -13,7 +13,7 @@
       ],
       "js": ["hook.js"],
       "world": "MAIN",
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "icons": {

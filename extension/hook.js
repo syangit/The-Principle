@@ -211,22 +211,54 @@ The user's actual message follows:
 `;
   })();
 
+  let preambleStats = null;
   if (rules.preamble) {
     const cfg = rules.preamble;
+    const stats = preambleStats = { fetchCalls: 0, xhrCalls: 0, injected: 0 };
+
+    function maybeInject(bodyStr) {
+      if (typeof bodyStr !== 'string') return bodyStr;
+      try {
+        const body = JSON.parse(bodyStr);
+        if (cfg.firstMessageMarker(body) && body[cfg.promptField] && !body[cfg.promptField].startsWith('[INFERO-HOOK CONTEXT')) {
+          body[cfg.promptField] = PREAMBLE_TEXT + body[cfg.promptField];
+          stats.injected++;
+          console.log('[infero-hook] preamble injected (first message of new session)');
+          return JSON.stringify(body);
+        }
+      } catch (_) {}
+      return bodyStr;
+    }
+
+    // Patch fetch
     const origFetch = window.fetch.bind(window);
     window.fetch = async function (input, init) {
       try {
         const url = typeof input === 'string' ? input : input?.url || '';
-        if (init && init.body && typeof init.body === 'string' && url.includes(cfg.urlMatch)) {
-          const body = JSON.parse(init.body);
-          if (cfg.firstMessageMarker(body) && body[cfg.promptField] && !body[cfg.promptField].startsWith('[INFERO-HOOK CONTEXT')) {
-            body[cfg.promptField] = PREAMBLE_TEXT + body[cfg.promptField];
-            init = Object.assign({}, init, { body: JSON.stringify(body) });
-            console.log('[infero-hook] preamble injected (first message of new session)');
-          }
+        if (url.includes(cfg.urlMatch)) stats.fetchCalls++;
+        if (init && typeof init.body === 'string' && url.includes(cfg.urlMatch)) {
+          const newBody = maybeInject(init.body);
+          if (newBody !== init.body) init = Object.assign({}, init, { body: newBody });
         }
-      } catch (_) { /* not our concern; fall through */ }
+      } catch (_) {}
       return origFetch(input, init);
+    };
+
+    // Patch XHR (DeepSeek may use XHR instead of fetch)
+    const origOpen = XMLHttpRequest.prototype.open;
+    const origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+      this.__inferoUrl = url;
+      return origOpen.call(this, method, url, ...rest);
+    };
+    XMLHttpRequest.prototype.send = function (body) {
+      try {
+        if (this.__inferoUrl && this.__inferoUrl.includes(cfg.urlMatch)) {
+          stats.xhrCalls++;
+          if (typeof body === 'string') body = maybeInject(body);
+        }
+      } catch (_) {}
+      return origSend.call(this, body);
     };
   }
 
@@ -298,8 +330,14 @@ The user's actual message follows:
     clearTimeout(last.__inferoDoneTimer);
     last.__inferoDoneTimer = setTimeout(() => onAssistantDone(last), rules.debounceMs);
   });
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  // document.body may not exist yet at document_start; wait for it.
+  function attachObserver() {
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+  if (document.body) attachObserver();
+  else document.addEventListener('DOMContentLoaded', attachObserver, { once: true });
   hookState.observer = observer;
+  hookState.preambleStats = preambleStats;
   window.__inferoHook = hookState;
 
   // ── Skill manager (infero.*) + initBeing ──────────────────────────────
