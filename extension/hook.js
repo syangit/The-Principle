@@ -17,7 +17,6 @@
       sendKind: 'enter',                          // dispatch Enter on the textarea
       messageSelector: '.ds-assistant-message-main-content',
       streamingSelector: null,                    // no obvious "stop" signal; pure time debounce
-      cspMode: 'eval',
       debounceMs: 800,
       // Invisibly prepend our protocol preamble to the FIRST user message of a new chat
       // session. parent_message_id === null marks the first message; subsequent messages
@@ -36,7 +35,6 @@
       sendSelector: 'button[aria-label="Send message"]',
       messageSelector: '.font-claude-response',
       streamingSelector: 'button[aria-label*="Stop"]',
-      cspMode: 'nonce',
       debounceMs: 600,
     },
     'chatgpt.com': {
@@ -47,7 +45,6 @@
       sendSelector: 'button[data-testid="send-button"]',
       messageSelector: '[data-message-author-role="assistant"]',
       streamingSelector: 'button[data-testid="stop-button"]',
-      cspMode: 'nonce',
       debounceMs: 600,
     },
     'gemini.google.com': {
@@ -57,7 +54,6 @@
       sendSelector: 'button[aria-label*="Send"], button.send-button',
       messageSelector: 'model-response',
       streamingSelector: null,
-      cspMode: 'nonce',
       debounceMs: 800,
     },
   };
@@ -73,42 +69,18 @@
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const fnv1a = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = (h ^ s.charCodeAt(i)) * 16777619 >>> 0; return h.toString(36); };
 
-  // ── CSP-safe code exec ────────────────────────────────────────────────
-  // 'eval' mode: just use (0, eval)(code).
-  // 'nonce' mode: read a nonce from any existing inline script, inject a
-  // new <script nonce="..."> via strict-dynamic.
+  // ── Universal code exec via dynamic <script> tag ──────────────────────
+  // Works on permissive CSPs (DeepSeek — inline scripts allowed) and on
+  // strict-dynamic + nonce CSPs (Claude.ai — copy any existing script's nonce).
+  // Only sites that disallow inline script entirely (rare) will block this.
 
   function getNonce() {
     for (const s of document.querySelectorAll('script')) if (s.nonce) return s.nonce;
     return '';
   }
 
-  function execJsEval(code) {
+  function execJsCSP(code) {
     return new Promise(resolve => {
-      // Wrap in an async IIFE so top-level await works, and capture console.log
-      // for stdout reporting — same shape as the nonce path.
-      const stdout = [];
-      const _o = console.log, _e = console.error;
-      console.log = (...a) => { stdout.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); _o(...a); };
-      console.error = (...a) => { stdout.push('[err] ' + a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); _e(...a); };
-      try {
-        const wrapped = '(async () => {\n' + code + '\n})()';
-        const r = (0, eval)(wrapped);
-        Promise.resolve(r).then(
-          () => { console.log = _o; console.error = _e; resolve({ ok: true, stdout: stdout.join('\n') }); },
-          (err) => { console.log = _o; console.error = _e; resolve({ ok: false, stdout: stdout.join('\n'), error: err.message }); }
-        );
-      } catch (e) {
-        console.log = _o; console.error = _e;
-        resolve({ ok: false, stdout: stdout.join('\n'), error: e.message });
-      }
-    });
-  }
-
-  function execJsNonce(code) {
-    return new Promise(resolve => {
-      const nonce = getNonce();
-      if (!nonce) return resolve({ ok: false, error: 'no CSP nonce on page' });
       const id = 'infero_' + Math.random().toString(36).slice(2);
       const safe = code.replace(/<\/script/gi, '<\\/script');
       const wrapped =
@@ -122,16 +94,25 @@
         '  console.log = _o; console.error = _e;\n' +
         '  window.dispatchEvent(new CustomEvent(\'' + id + '\', { detail: { stdout: stdout.join(\'\\n\'), error } }));\n' +
         '})();';
-      window.addEventListener(id, ev => resolve({ ok: !ev.detail.error, ...ev.detail }), { once: true });
+      let settled = false;
+      window.addEventListener(id, ev => {
+        if (settled) return; settled = true;
+        resolve({ ok: !ev.detail.error, ...ev.detail });
+      }, { once: true });
       const s = document.createElement('script');
-      s.nonce = nonce;
+      const nonce = getNonce();
+      if (nonce) s.nonce = nonce;  // only meaningful if page CSP has 'strict-dynamic'
       s.textContent = wrapped;
-      document.head.appendChild(s);
-      setTimeout(() => s.remove(), 1000);
+      (document.head || document.documentElement).appendChild(s);
+      setTimeout(() => s.remove(), 2000);
+      // CSP completely-block fallback: if the event never fires within 5s,
+      // the script was likely blocked silently. Resolve with diagnostic error.
+      setTimeout(() => {
+        if (settled) return; settled = true;
+        resolve({ ok: false, error: 'exec timeout — possibly blocked by CSP (no nonce ' + (nonce ? 'matched' : 'available') + ')' });
+      }, 5000);
     });
   }
-
-  const execJsCSP = rules.cspMode === 'nonce' ? execJsNonce : execJsEval;
 
   // ── trigger(text) ─────────────────────────────────────────────────────
   async function triggerImpl(text) {
