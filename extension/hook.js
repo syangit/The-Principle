@@ -36,6 +36,15 @@
       messageSelector: '.font-claude-response',
       streamingSelector: 'button[aria-label*="Stop"]',
       debounceMs: 600,
+      // create_conversation_params is only present on the first POST of a brand-new
+      // conversation; subsequent messages drop it. No HMAC body signature on this
+      // host, so we can modify `prompt` freely.
+      preamble: {
+        urlMatch: '/chat_conversations/',
+        urlMatchSuffix: '/completion',
+        promptField: 'prompt',
+        firstMessageMarker: (body) => !!body.create_conversation_params,
+      },
     },
     'chatgpt.com': {
       // Best-effort; selectors may shift. Verify on first install.
@@ -219,13 +228,19 @@ The user's actual message follows:
       return bodyStr;
     }
 
+    function urlMatches(url) {
+      if (!url || !url.includes(cfg.urlMatch)) return false;
+      if (cfg.urlMatchSuffix && !url.includes(cfg.urlMatchSuffix)) return false;
+      return true;
+    }
+
     // Patch fetch
     const origFetch = window.fetch.bind(window);
     window.fetch = async function (input, init) {
       try {
         const url = typeof input === 'string' ? input : input?.url || '';
-        if (url.includes(cfg.urlMatch)) stats.fetchCalls++;
-        if (init && typeof init.body === 'string' && url.includes(cfg.urlMatch)) {
+        if (urlMatches(url)) stats.fetchCalls++;
+        if (init && typeof init.body === 'string' && urlMatches(url)) {
           const newBody = maybeInject(init.body);
           if (newBody !== init.body) init = Object.assign({}, init, { body: newBody });
         }
@@ -233,7 +248,7 @@ The user's actual message follows:
       return origFetch(input, init);
     };
 
-    // Patch XHR (DeepSeek may use XHR instead of fetch)
+    // Patch XHR (some hosts use XHR instead of fetch — DeepSeek does)
     const origOpen = XMLHttpRequest.prototype.open;
     const origSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function (method, url, ...rest) {
@@ -242,7 +257,7 @@ The user's actual message follows:
     };
     XMLHttpRequest.prototype.send = function (body) {
       try {
-        if (this.__inferoUrl && this.__inferoUrl.includes(cfg.urlMatch)) {
+        if (urlMatches(this.__inferoUrl)) {
           stats.xhrCalls++;
           if (typeof body === 'string') body = maybeInject(body);
         }
