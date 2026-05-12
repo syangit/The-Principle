@@ -1,4 +1,4 @@
-// INFERO Hook — content script (world: "MAIN")
+// INFERO Companion — content script (world: "MAIN")
 //
 // Turns the current chat page into a Being container. Detects host, wires up
 // the /exec protocol, exposes window.trigger / window.infero / window.DB.
@@ -248,7 +248,7 @@ Detailed principles, philosophy, and self-modification mechanics are available a
         if (cfg.firstMessageMarker(body) && body[cfg.promptField] && !body[cfg.promptField].includes('Infero, ergo sum')) {
           body[cfg.promptField] = PREAMBLE_TEXT + body[cfg.promptField];
           stats.injected++;
-          console.log('[infero-hook] preamble injected (first message of new session)');
+          console.log('[infero] preamble injected (first message of new session)');
           return JSON.stringify(body);
         }
       } catch (_) {}
@@ -490,9 +490,9 @@ Detailed principles, philosophy, and self-modification mechanics are available a
     try {
       await initBeing();
       const boot = await bootSkills();
-      console.log('[infero-hook] ready on', host, '· being:', window.currentBeingId, '· boot:', boot);
+      console.log('[infero] ready on', host, '· being:', window.currentBeingId, '· boot:', boot);
     } catch (e) {
-      console.error('[infero-hook] init failed', e);
+      console.error('[infero] init failed', e);
     }
   })();
 })();

@@ -1,4 +1,4 @@
-// INFERO Hook — service worker. Owns the chrome.debugger API.
+// INFERO Companion — service worker. Owns the chrome.debugger API.
 //
 // Why: Chrome Web Store's RHC policy forbids running strings via eval()
 // or injected <script> tags, but explicitly carves out chrome.debugger
@@ -16,7 +16,7 @@ async function ensureAttached(tabId) {
   if (attached.get(tabId)) return;
   await chrome.debugger.attach({ tabId }, '1.3');
   attached.set(tabId, true);
-  console.log('[infero-hook] debugger attached to tab', tabId);
+  console.log('[infero] debugger attached to tab', tabId);
 }
 
 async function evalInTab(tabId, expression, opts = {}) {
@@ -35,7 +35,7 @@ async function evalInTab(tabId, expression, opts = {}) {
 }
 
 chrome.debugger.onDetach.addListener(({ tabId }, reason) => {
-  console.log('[infero-hook] debugger detached from tab', tabId, 'reason:', reason);
+  console.log('[infero] debugger detached from tab', tabId, 'reason:', reason);
   attached.delete(tabId);
 });
 
@@ -67,4 +67,4 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;  // keep channel open for async response
 });
 
-console.log('[infero-hook] service worker ready');
+console.log('[infero] service worker ready');

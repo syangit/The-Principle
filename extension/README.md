@@ -1,4 +1,4 @@
-# INFERO Hook — Browser Extension
+# INFERO Companion — Browser Extension
 
 Manifest V3 content-script. Auto-injects on supported chat hosts; turns
 each page into a Being container with `/exec` protocol, hub-shared skills,
@@ -26,7 +26,7 @@ Adding a new host = adding one entry to `HOST_RULES` in `hook.js`.
 4. Open one of the supported chat sites
 5. DevTools console should print:
    ```
-   [infero-hook] ready on <host> · being: being_xxx · boot: { loaded: [...], failed: [] }
+   [infero] ready on <host> · being: being_xxx · boot: { loaded: [...], failed: [] }
    ```
 
 ## What gets exposed on `window`
@@ -107,7 +107,7 @@ independent paired devices. Skills cross-pollinate via the Hub
 ## Known limitations
 
 - Host selector changes break the hook silently. Watch the console for
-  `'[infero-hook] ready on …'` — if absent on a supported site, the selector
+  `'[infero] ready on …'` — if absent on a supported site, the selector
   drifted; update `HOST_RULES` in `hook.js`.
 - Manifest V3 + `world: "MAIN"` requires Chrome ≥ 102, Firefox ≥ 128.
 - No popup UI yet. Toggle on/off via Chrome's extension menu.

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "INFERO Hook",
+  "name": "INFERO Companion",
   "version": "0.2.0",
   "description": "Turn any LLM chat web app into an INFERO Being container. /exec protocol, hub-shared skill descriptions, encrypted device relay.",
   "permissions": ["debugger"],

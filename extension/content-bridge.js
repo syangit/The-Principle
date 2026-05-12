@@ -1,4 +1,4 @@
-// INFERO Hook — content script (ISOLATED world). Bridges the MAIN-world
+// INFERO Companion — content script (ISOLATED world). Bridges the MAIN-world
 // hook's exec requests to the service worker, which owns chrome.debugger.
 //
 // MAIN world dispatches CustomEvent('infero-exec', { detail: { id, code, timeout } })
