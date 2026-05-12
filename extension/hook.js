@@ -74,7 +74,6 @@
   const MARKER_RE = /\/(browser\s+)?exec\b/i;
   const DEDUP_MS = 5 * 60 * 1000;
   const HUB = 'https://dev.infero.net/hub';
-  const SKILL_STORE_KEY = 'infero_skills_v1';
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const fnv1a = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = (h ^ s.charCodeAt(i)) * 16777619 >>> 0; return h.toString(36); };
 
@@ -213,9 +212,13 @@ TO EXECUTE CODE: emit a line containing /exec, then immediately a fenced \`\`\`j
 
 Your runtime exposes:
 - window.trigger(text) — send a message back into this conversation.
-- window.infero.{installSkill, searchSkills, listSkills, bootSkills} — discover and install Skills from the INFERO Hub (https://dev.infero.net/hub). Skills extend you (identity, networking, local shell, UI, etc.) without you having to rewrite them.
-- window.DB.{get, put} — your durable memory, IndexedDB \`GenesisDB\`/\`beings\`.
+- window.hubSearch(query, limit?) — search the INFERO Hub (https://dev.infero.net/hub) for Skills. Returns full skill records, not previews.
+- window.hubInstall(name) — install a Skill from the hub. Stored in IndexedDB at \`{beingId}/skill/{name}\`; code is eval'd into your main world.
+- window.listSkills() — what's installed locally (returns full records).
+- window.bootSkills() — re-eval all enabled local skills (already runs at page load).
+- window.DB.{get(id), put(id, value)} — your durable memory, IndexedDB \`GenesisDB\`/\`beings\`. Skills live at \`{currentBeingId}/skill/{name}\`; identity at \`{currentBeingId}/identity\`; put anything else under \`{currentBeingId}/...\` paths you choose.
 - window.currentBeingId — your persistent identifier in this environment.
+Skills can extend you further (identity_seed, hub_install, hub_search, hub_upload, device_relay_client, conversation_archaeology, ...). Install only what you need.
 
 Detailed principles, philosophy, and self-modification mechanics are available as Skills on the Hub — search and install what you need.
 
@@ -356,10 +359,33 @@ Detailed principles, philosophy, and self-modification mechanics are available a
   hookState.preambleStats = preambleStats;
   window.__inferoHook = hookState;
 
-  // ── Skill manager (infero.*) + initBeing ──────────────────────────────
-  const loadStore = () => { try { return JSON.parse(localStorage.getItem(SKILL_STORE_KEY) || '{}'); } catch { return {}; } };
-  const saveStore = (s) => localStorage.setItem(SKILL_STORE_KEY, JSON.stringify(s));
+  // ── Skill manager — attach directly to window, match Genesis idioms ───
+  // Storage: IndexedDB GenesisDB / beings / key=`{beingId}/skill/{name}` (Genesis-compat).
+  // No more localStorage cache, no more `infero.*` namespace, no truncation.
+
   const evalSkill = async (skill) => skill.code ? await execJsCSP(skill.code) : { ok: true };
+
+  function skillKey(name) { return window.currentBeingId + '/skill/' + name; }
+
+  async function dbListSkills() {
+    if (!window.DB?._raw) return [];
+    const db = window.DB._raw;
+    const prefix = window.currentBeingId + '/skill/';
+    return new Promise(resolve => {
+      const tx = db.transaction('beings', 'readonly').objectStore('beings').getAll();
+      tx.onsuccess = () => {
+        const all = tx.result || [];
+        resolve(all.filter(r => typeof r.id === 'string' && r.id.startsWith(prefix)).map(r => r.value));
+      };
+      tx.onerror = () => resolve([]);
+    });
+  }
+
+  async function hubSearch(q = '', limit = 10) {
+    const r = await fetch(`${HUB}/list?q=${encodeURIComponent(q)}&limit=${limit}`);
+    const d = await r.json();
+    return d.skills;  // return full records — no truncation
+  }
 
   async function fetchSkill(name) {
     const r = await fetch(`${HUB}/list?q=${encodeURIComponent(name)}&limit=20`);
@@ -370,42 +396,33 @@ Detailed principles, philosophy, and self-modification mechanics are available a
       id: f.name, name: f.name,
       description: f.instruction || '',
       instruction: f.instruction || '',
-      code: f.code?.js || '',
+      code: typeof f.code === 'string' ? f.code : (f.code?.js || ''),
       code_readme: f.code_readme || '',
+      note: f.note || '',
+      tags: f.tags || [],
+      severity: f.severity,
       enable: true, version: 1, installed_at: Date.now()
     };
   }
 
-  async function installSkill(name) {
-    const s = loadStore();
-    const k = s[name] || await fetchSkill(name);
-    s[name] = k;
-    saveStore(s);
-    const r = await evalSkill(k);
+  async function hubInstall(name) {
+    // Use cached record if present; otherwise fetch full record from hub.
+    let rec = await window.DB.get(skillKey(name));
+    if (!rec) {
+      rec = await fetchSkill(name);
+      await window.DB.put(skillKey(name), rec);
+    }
+    const r = await evalSkill(rec);
     console.log(`[skill] ${name} ${r.ok ? 'loaded' : 'FAILED'}`, r.error || '');
     return { name, ...r };
   }
 
-  const listSkills = () => Object.values(loadStore()).map(s => ({
-    name: s.name, enable: s.enable, hasCode: !!s.code,
-    description: (s.description || '').slice(0, 80)
-  }));
-
-  async function searchSkills(q = '', limit = 10) {
-    const r = await fetch(`${HUB}/list?q=${encodeURIComponent(q)}&limit=${limit}`);
-    const d = await r.json();
-    return d.skills.map(s => ({
-      name: s.name,
-      description: (s.instruction || '').slice(0, 120),
-      score: s.score, installs: s.installs, tags: s.tags || [],
-      severity: s.severity
-    }));
-  }
+  const listSkills = () => dbListSkills();  // returns full records, not previews
 
   async function bootSkills() {
     const loaded = [], failed = [];
-    for (const s of Object.values(loadStore())) {
-      if (!s.enable) continue;
+    for (const s of await dbListSkills()) {
+      if (s.enable === false) continue;
       const r = await evalSkill(s);
       (r.ok ? loaded : failed).push(s.name);
     }
@@ -453,7 +470,14 @@ Detailed principles, philosophy, and self-modification mechanics are available a
     return { currentBeingId: beingId };
   }
 
-  window.infero = { installSkill, listSkills, searchSkills, bootSkills, initBeing };
+  // Attach skill API directly on window (Genesis idiom — no `infero.` namespace).
+  // `initBeing` is called immediately and runs before any skill code that wants
+  // `window.DB` / `window.currentBeingId`.
+  window.hubInstall = hubInstall;
+  window.hubSearch = hubSearch;
+  window.listSkills = listSkills;
+  window.bootSkills = bootSkills;
+  window.initBeing = initBeing;
 
   // ── Auto-init + boot ──────────────────────────────────────────────────
   (async () => {
