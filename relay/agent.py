@@ -390,6 +390,7 @@ class GenesisWorker:
             if B is None:
                 break
             await self.act(B)
+            self._maybe_compress_consciousness()
             self.save_to_disk()
             if not B.strip():
                 break  # empty response — stop to avoid infinite quota burn
@@ -620,6 +621,72 @@ class GenesisWorker:
         clean_ai = re.sub(r'^\*{0,2}Digital Being\s*[-–—]\s*\[.*?\]\*{0,2}\n?', '', ai_text)
         self.consciousness += f"**Digital Being - [{time_str}]**\n{clean_ai}\n\n"
         return ai_text
+
+    _BRIDGE_START = '=== bridge:start ==='
+    _BRIDGE_END   = '=== bridge:end ==='
+    _BRIDGE_RE = re.compile(r'\n*' + re.escape('=== bridge:start ===') + r'[\s\S]*?' + re.escape('=== bridge:end ===') + r'\n*')
+
+    def _maybe_compress_consciousness(self):
+        # Mirror of src/index.html maybeCompressConsciousness; storage is filesystem here.
+        cfg = (self.llm_settings or {}).get('compressCfg') or {}
+        limit_tokens = cfg.get('at', 300000)
+        head_frac = cfg.get('head', 0.1)
+        tail_frac = cfg.get('tail', 0.7)
+        MIN_TAIL_FRAC = 0.3
+        BRIDGE_MAX = 50
+        PREVIEW = 100
+
+        prompt_tokens = self._last_prompt_tokens or 0
+        if prompt_tokens < limit_tokens:
+            return
+
+        clean = self._BRIDGE_RE.sub('\n\n', self.consciousness)
+        if len(clean) == 0 or prompt_tokens == 0:
+            return
+        cpt = len(clean) / prompt_tokens
+        start_chars = int(limit_tokens * head_frac * cpt)
+
+        d = self._being_dir()
+        if not d:
+            return
+        log_dir = d  # logs stored alongside other being state
+        existing = sorted(f for f in os.listdir(log_dir) if f.startswith('context_log_') and f.endswith('.txt'))
+
+        projected_count = min(len(existing) + 1, BRIDGE_MAX)
+        est_bridge = projected_count * (PREVIEW * 2 + 50) + len(self._BRIDGE_START) + len(self._BRIDGE_END) + 8
+        tail_target = int(limit_tokens * tail_frac * cpt)
+        min_tail = int(limit_tokens * MIN_TAIL_FRAC * cpt)
+        tail_chars = max(min_tail, tail_target - est_bridge)
+
+        if start_chars + tail_chars >= len(clean):
+            return
+
+        middle = clean[start_chars:len(clean) - tail_chars]
+        ts_ms = int(time.time() * 1000)
+        log_name = f'context_log_{ts_ms}.txt'
+        try:
+            with open(os.path.join(log_dir, log_name), 'w', encoding='utf-8') as f:
+                f.write(middle)
+        except Exception as e:
+            self._log(f"[{ts()}] [Compress] write {log_name} failed: {e}")
+            return
+
+        fresh = sorted(f for f in os.listdir(log_dir) if f.startswith('context_log_') and f.endswith('.txt'))[-BRIDGE_MAX:]
+        def _entry(fn):
+            try:
+                with open(os.path.join(log_dir, fn), encoding='utf-8') as fh: t = fh.read()
+            except Exception: t = ''
+            flat = lambda s: re.sub(r'\s+', ' ', s).strip()
+            stamp = fn[len('context_log_'):-4]
+            return f"[gap {stamp}: {flat(t[:PREVIEW])} ... {flat(t[-PREVIEW:])}]"
+        entries = '\n'.join(_entry(fn) for fn in fresh)
+        bridge_block = f"\n\n{self._BRIDGE_START}\n{entries}\n{self._BRIDGE_END}\n\n"
+
+        self.consciousness = clean[:start_chars] + bridge_block + clean[len(clean) - tail_chars:]
+        self.metadata['cacheName'] = None
+        self.metadata['cachedLength'] = 0
+        self._last_prompt_tokens = 0
+        self._log(f"[{ts()}] [Compress] saved {log_name}, bridge={len(fresh)} entries ({len(bridge_block)} chars), tail={tail_chars}, total={len(self.consciousness)}")
 
     def _skill_shell_code(self, code):
         """Pick the shell variant of a skill's code. String code is treated as shell (best-effort);

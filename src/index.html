@@ -521,29 +521,59 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             scheduleSaveBeing();
         }
 
+        const BRIDGE_START = '=== bridge:start ===';
+        const BRIDGE_END   = '=== bridge:end ===';
         async function maybeCompressConsciousness() {
             const modelMax = MODEL_LIST[settings.model]?.maxContext || 0;
             const compressCfg = MODEL_LIST[settings.model]?.compress;
-            const LIMIT = compressCfg?.at ?? (modelMax ? Math.floor(modelMax * 2 / 3) : 300000);
-            const HEAD  = compressCfg?.head ?? 0.1;
-            const TAIL  = compressCfg?.tail ?? 0.6;
-            const KEEP_START = Math.floor(LIMIT * HEAD);
-            const KEEP_END   = Math.floor(LIMIT * TAIL);
+            const LIMIT      = compressCfg?.at   ?? (modelMax ? Math.floor(modelMax * 2 / 3) : 300000);
+            const HEAD_FRAC  = compressCfg?.head ?? 0.1;
+            const TAIL_FRAC  = compressCfg?.tail ?? 0.7;   // tail + bridge target combined
+            const MIN_TAIL_FRAC = 0.3;
+            const BRIDGE_MAX = 50;
+            const PREVIEW    = 100;                         // chars at each end of the cut
+
             if (_lastPromptTokens < LIMIT) return;
-            const cpt = consciousness.length / _lastPromptTokens;  // chars per token
-            const startChars = Math.floor(KEEP_START * cpt);
-            const endChars   = Math.floor(KEEP_END   * cpt);
-            if (startChars + endChars >= consciousness.length) return;
-            const middle = consciousness.slice(startChars, consciousness.length - endChars);
-            const logKey = `${currentBeingId}/context_log_${Date.now()}.txt`;
+
+            const bridgeRe = new RegExp(`\\n*${BRIDGE_START}[\\s\\S]*?${BRIDGE_END}\\n*`, 'g');
+            const clean = consciousness.replace(bridgeRe, '\n\n');
+            const cpt = clean.length / _lastPromptTokens;
+            const startChars = Math.floor(LIMIT * HEAD_FRAC * cpt);
+
+            const prefix = `${currentBeingId}/context_log_`;
+            const existing = (await DB.list())
+                .filter(r => typeof r.id === 'string' && r.id.startsWith(prefix))
+                .sort((a, b) => a.id.localeCompare(b.id));
+            const projectedCount = Math.min(existing.length + 1, BRIDGE_MAX);
+            const estBridgeChars = projectedCount * (PREVIEW * 2 + 50) + BRIDGE_START.length + BRIDGE_END.length + 8;
+            const tailTargetChars = Math.floor(LIMIT * TAIL_FRAC * cpt);
+            const minTailChars = Math.floor(LIMIT * MIN_TAIL_FRAC * cpt);
+            const tailChars = Math.max(minTailChars, tailTargetChars - estBridgeChars);
+
+            if (startChars + tailChars >= clean.length) return;
+
+            const middle = clean.slice(startChars, clean.length - tailChars);
+            const logKey = `${prefix}${Date.now()}.txt`;
             await DB.put({ id: logKey, text: middle });
-            const note = `\n\n[System - Context compressed. Logs: IndexedDB "${currentBeingId}/context_log_*.txt"]\n\n`;
-            consciousness = consciousness.slice(0, startChars) + note + consciousness.slice(consciousness.length - endChars);
+
+            const fresh = (await DB.list())
+                .filter(r => typeof r.id === 'string' && r.id.startsWith(prefix))
+                .sort((a, b) => a.id.localeCompare(b.id))
+                .slice(-BRIDGE_MAX);
+            const flat = s => (s || '').replace(/\s+/g, ' ').trim();
+            const entries = fresh.map(r => {
+                const t = r.text || '';
+                const stamp = r.id.slice(prefix.length).replace('.txt', '');
+                return `[gap ${stamp}: ${flat(t.slice(0, PREVIEW))} ... ${flat(t.slice(-PREVIEW))}]`;
+            }).join('\n');
+            const bridgeBlock = `\n\n${BRIDGE_START}\n${entries}\n${BRIDGE_END}\n\n`;
+
+            consciousness = clean.slice(0, startChars) + bridgeBlock + clean.slice(clean.length - tailChars);
             cacheName = null;
             cachedLength = 0;
             _cachedStableHead = null;
-            _lastPromptTokens = 0;  // reset so next check uses actual post-compression count
-            console.log(`[Compress] tokens=${_lastPromptTokens}, middle saved to ${logKey}, consciousness trimmed to ${consciousness.length} chars`);
+            _lastPromptTokens = 0;
+            console.log(`[Compress] saved ${logKey}, bridge=${fresh.length} entries (${bridgeBlock.length} chars), tail=${tailChars}, total=${consciousness.length}`);
         }
 
         // Cache: create/refresh based on real token counts
