@@ -12,7 +12,9 @@
   // ── Host adapters ──────────────────────────────────────────────────────
   const HOST_RULES = {
     'chat.deepseek.com': {
-      inputSelector: 'textarea[placeholder="Message DeepSeek"]',
+      // Substring match — DS placeholder is "Message DeepSeek" (EN) or
+      // "给 DeepSeek 发送消息 " (ZH); both contain "DeepSeek".
+      inputSelector: 'textarea[placeholder*="DeepSeek"]',
       inputType: 'textarea',
       sendKind: 'enter',                          // dispatch Enter on the textarea
       messageSelector: '.ds-assistant-message-main-content',
@@ -134,6 +136,11 @@
 
     if (rules.inputType === 'textarea') {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      // React 16+ tracks the last-seen DOM value via element._valueTracker.
+      // setter.call bypasses React's onChange detection unless we reset the
+      // tracker so React sees "value changed" on the next compare.
+      const tracker = ed._valueTracker;
+      if (tracker) tracker.setValue(ed.value);
       setter.call(ed, text);
       ed.dispatchEvent(new Event('input', { bubbles: true }));
     } else {
@@ -163,6 +170,8 @@
     if (ed2) {
       if (rules.inputType === 'textarea') {
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+        const tracker2 = ed2._valueTracker;
+        if (tracker2) tracker2.setValue(ed2.value);
         setter.call(ed2, draft || '');
         ed2.dispatchEvent(new Event('input', { bubbles: true }));
       } else {
