@@ -12,8 +12,6 @@ window.MODELS = {
     "zhipu":      { "name": "Zhipu AI (GLM)", "format": "openai", "endpoint": "https://open.bigmodel.cn/api/paas/v4/chat/completions" }
   },
   "models": [
-    { "name": "infero-1.0", "format": "gemini", "from": {
-      "infero": "gemini-3.1-pro-preview" }},
     { "name": "gemini-3.5-flash", "format": "gemini", "from": {
       "infero": "gemini-3.5-flash", "google": "gemini-3.5-flash", "openrouter": "google/gemini-3.5-flash" }},
     { "name": "gemini-3.1-pro", "format": "gemini", "from": {
