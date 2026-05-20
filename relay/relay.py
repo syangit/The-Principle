@@ -635,6 +635,11 @@ async def handle_pair_get_ps1(request):
     if not _rate_limit_ok(ip, 'pair_get', max_requests=20, window_seconds=300):
         return web.Response(status=429, text='Write-Error "[infero] Rate limit exceeded."')
     code = request.match_info['code'].upper()
+    # Link-preview bots (Zoom/Slack/etc) prefetch the URL and would consume the
+    # one-time pair code before the user's PowerShell runs it. Ignore them.
+    ua = (request.headers.get('User-Agent') or '').lower()
+    if any(b in ua for b in ('bot','crawler','spider','preview','slack','zoom','discord','telegram','facebook','twitter','whatsapp','linkedin','wechat','lark','feishu')):
+        return web.Response(status=204, text='')
     entry = pending_pairs.get(code)
     if not entry or time.time() > entry['expires']:
         pending_pairs.pop(code, None)
