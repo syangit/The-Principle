@@ -34,7 +34,7 @@ Genesis (Infero) v0.1 — a local-first digital life engine. Split-screen web ap
 **Single file, zero build step:**
 
 - **`src/index.html`** — The entire frontend: UI, state management, IndexedDB storage, SSE streaming, JS execution, and the system prompt. All in one self-contained SPA.
-- **`src/models.json`** — Model and provider configuration, loaded from remote (`https://infero.net/genesis/models.json`).
+- **`src/models.js`** — Model and provider configuration (`window.MODELS = {...}`), loaded as a `<script>` (served from `src/`).
 - **`src/i18n.json`** — UI string translations (zh/en).
 
 **Data flow:** Browser → LLM API (SSE) → streamed back to browser. Provider/endpoint configurable in settings (Gemini, OpenAI, Anthropic, DeepSeek, OpenRouter, custom).
