@@ -577,6 +577,7 @@ async def hub_skill(name: str, request: Request):
                 pass  # already counted for this user
     return skill_to_dict(row, include_code=True)
 
+@app.post("/hub/upload")
 @app.post("/hub/submit")
 async def hub_submit(request: Request):
     author_hash = get_user_hash(request)
