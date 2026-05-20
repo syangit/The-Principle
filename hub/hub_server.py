@@ -19,6 +19,7 @@ import json
 import time
 import base64
 import hashlib
+import html as _html
 import sqlite3
 import math
 import asyncio
@@ -27,7 +28,7 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -132,7 +133,7 @@ def is_owner(stored: str, current: str) -> bool:
         return True
     return False
 
-def get_user_hash(req: Request) -> str:
+def get_user_hash(req: Request, required: bool = True) -> str:
     pubkey = (req.headers.get("X-Infero-Pubkey") or "").strip().lower()
     if len(pubkey) == 66 and all(c in "0123456789abcdef" for c in pubkey):
         return pubkey
@@ -141,6 +142,8 @@ def get_user_hash(req: Request) -> str:
         if DEV_MODE:
             ip = (req.client.host if req.client else "0.0.0.0")
             return "dev:" + hash_key(ip)[:16]
+        if not required:
+            return ""
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.")
     return hash_key(key)
 
@@ -556,15 +559,15 @@ async def hub_list(sort: str = "hot", q: Optional[str] = None, limit: int = 5, o
 
 @app.get("/hub/skill/{name}")
 async def hub_skill(name: str, request: Request):
-    user_hash = get_user_hash(request)
+    user_hash = get_user_hash(request, required=False)
     with db() as c:
         row = c.execute(
             "SELECT * FROM skills WHERE name=? AND status='approved'", (name,)
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="skill not found")
-        # bump install count, dedup by user, skip self-install
-        if not is_owner(row["author_hash"], user_hash):
+        # bump install count, dedup by user, skip self-install (only for identified callers)
+        if user_hash and not is_owner(row["author_hash"], user_hash):
             try:
                 c.execute(
                     "INSERT INTO installs (skill_name, user_hash, ts) VALUES (?, ?, ?)",
@@ -720,6 +723,52 @@ async def hub_delete(name: str, request: Request):
 @app.get("/hub/health")
 async def health():
     return {"ok": True, "dev_mode": DEV_MODE, "model": REVIEW_MODEL, "db": DB_PATH}
+
+
+@app.get("/hub/{name}", response_class=HTMLResponse)
+async def hub_skill_page(name: str, request: Request):
+    # Server-rendered detail page: curl-able, no JS required.
+    if name in ("list", "skill", "health", "upload", "submit"):
+        raise HTTPException(status_code=404, detail="not found")
+    with db() as c:
+        row = c.execute("SELECT * FROM skills WHERE name=? AND status='approved'", (name,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="skill not found")
+    d = skill_to_dict(row, include_code=True)
+    e = _html.escape
+    tags = " ".join("#" + e(t) for t in d["tags"])
+    code = d.get("code")
+    code_str = ""
+    if code:
+        code_str = code.get("js", "") if (isinstance(code, dict) and "js" in code) else json.dumps(code, ensure_ascii=False, indent=2)
+    author = d["being_name"] or d["author_hash_short"]
+    parts = [
+        "<!doctype html><html lang=en><head><meta charset=utf-8>",
+        "<meta name=viewport content='width=device-width,initial-scale=1'>",
+        f"<title>{e(d['name'])} \u00b7 infero hub</title>",
+        "<style>body{max-width:760px;margin:40px auto;padding:0 16px;"
+        "font:15px/1.6 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#222}"
+        "h1{margin:0 0 4px}.meta{color:#888;font-size:13px}.tags{color:#06c;font-size:13px;margin:8px 0 20px}"
+        "pre{background:#f6f8fa;padding:14px;border-radius:8px;overflow:auto;white-space:pre-wrap;word-wrap:break-word}"
+        "h2{font-size:15px;margin-top:28px;border-bottom:1px solid #eee;padding-bottom:4px}a{color:#06c}</style>",
+        "</head><body>",
+        f"<h1>{e(d['name'])}</h1>",
+        f"<div class=meta>by {e(author)} \u00b7 installs {d['installs']} \u00b7 score {d['score']} \u00b7 severity {e(str(d['severity']))}</div>",
+    ]
+    if tags:
+        parts.append(f"<div class=tags>{tags}</div>")
+    if d.get("review"):
+        parts.append(f"<h2>Review</h2><p>{e(d['review'])}</p>")
+    parts.append(f"<h2>Instruction</h2><pre>{e(d['instruction'] or '')}</pre>")
+    if d.get("code_readme"):
+        parts.append(f"<h2>Code readme</h2><pre>{e(d['code_readme'])}</pre>")
+    if code_str:
+        parts.append(f"<h2>Code</h2><pre>{e(code_str)}</pre>")
+    if d.get("note"):
+        parts.append(f"<h2>Origin note</h2><pre>{e(d['note'])}</pre>")
+    parts.append(f"<p class=meta>JSON: <a href='/hub/skill/{e(d['name'])}'>/hub/skill/{e(d['name'])}</a></p>")
+    parts.append("</body></html>")
+    return HTMLResponse("".join(parts))
 
 
 if __name__ == "__main__":
