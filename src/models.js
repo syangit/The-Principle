@@ -14,6 +14,8 @@ window.MODELS = {
   "models": [
     { "name": "infero-1.0", "format": "gemini", "from": {
       "infero": "gemini-3.1-pro-preview" }},
+    { "name": "gemini-3.5-flash", "format": "gemini", "from": {
+      "infero": "gemini-3.5-flash", "google": "gemini-3.5-flash", "openrouter": "google/gemini-3.5-flash" }},
     { "name": "gemini-3.1-pro", "format": "gemini", "from": {
       "infero": "gemini-3.1-pro-preview", "google": "gemini-3.1-pro-preview", "openrouter": "google/gemini-3.1-pro-preview" }},
     { "name": "gemini-3.1-flash-lite", "format": "gemini", "from": {

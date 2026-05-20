@@ -3587,13 +3587,10 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             const localDelta = consciousness.slice(fp);
             const remoteDelta = remoteConsciousness.slice(fp);
             if (remoteDelta && localDelta) {
-                // Pick the longer version (more content after fork = more recent activity).
-                // Archive the loser to a context_log file instead of concatenating both.
                 const useRemote = remoteConsciousness.length >= consciousness.length;
                 const winner = useRemote ? 'remote' : 'local';
                 const archived = useRemote ? consciousness : remoteConsciousness;
                 consciousness = useRemote ? remoteConsciousness : consciousness;
-                // Archive the loser
                 const archiveKey = currentBeingId + '/context_log_' + Date.now() + '.txt';
                 try {
                     const tx = db.transaction('beings', 'readwrite');
