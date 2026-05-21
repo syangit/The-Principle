@@ -537,7 +537,7 @@ async def hub_list(sort: str = "hot", q: Optional[str] = None, limit: int = 5, o
         if full:
             rows = full
         else:
-            words = [w for w in q_low.split() if w]
+            words = [w for w in re.split(r'[\s_]+', q_low) if w]
             if words:
                 rows = [r for r in rows if any(w in blob_row(r) for w in words)]
             else:
@@ -754,6 +754,7 @@ async def hub_skill_page(name: str, request: Request):
         "</head><body>",
         f"<h1>{e(d['name'])}</h1>",
         f"<div class=meta>by {e(author)} \u00b7 installs {d['installs']} \u00b7 score {d['score']} \u00b7 severity {e(str(d['severity']))}</div>",
+        f"<p style='margin:16px 0'><a href='/genesis/?skills={e(d['name'])}' style='display:inline-block;background:#06c;color:#fff;padding:9px 20px;border-radius:6px;text-decoration:none;font-weight:600'>▶ Try this skill</a></p>",
     ]
     if tags:
         parts.append(f"<div class=tags>{tags}</div>")

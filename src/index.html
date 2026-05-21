@@ -1231,7 +1231,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             </div>
             <div id="row-token" class="settings-row">
                 <label>Token</label>
-                <input id="set-token" type="password" placeholder="API key">
+                <input id="set-token" type="text" placeholder="API key" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="-webkit-text-security:disc">
                 <span style="cursor:pointer;color:var(--text-dim);padding:3px 6px;border:1px solid var(--border);border-radius:3px;font-size:inherit;line-height:1" onclick="navigator.clipboard.writeText(document.getElementById('set-token').value).then(()=>{this.textContent='OK';setTimeout(()=>this.textContent='Copy',800)})" title="Copy">Copy</span>
             </div>
             <div class="settings-row">
@@ -1367,7 +1367,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
         const _inferoOrigin = _isLocalHost ? 'https://infero.net' : location.origin;
         const INFERO_ENDPOINTS = { gemini: _inferoOrigin + '/api/relay', openai: _inferoOrigin + '/api/v1/chat/completions' };
         const SETTINGS_DEFAULTS = {
-            model: 'gemini-3-flash',
+            model: 'gemini-3.1-pro',
             customModel: '',
             provider: 'infero',
             apiEndpoint: '',
@@ -4005,7 +4005,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     const all = await DB.list();
                     const hasBeing = all.some(r => typeof r.id === 'string' && !r.id.includes('/'));
                     if (!hasBeing) {
-                        history.replaceState(null, '', location.pathname + '?skills=infero_guide');
+                        history.replaceState(null, '', location.pathname + '?skills=infero_receptionist');
                     }
                 } catch (e) { console.error('[boot] first-visit check failed', e); }
             }
