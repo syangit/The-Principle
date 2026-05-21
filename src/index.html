@@ -1605,7 +1605,7 @@ await DB.put(rec);
 await DB.del(key);
 
 // take down one of your own skills from the hub (soft-delete; name stays reserved to you)
-await fetch(window.HUB_BASE + '/skill/' + encodeURIComponent(skillName), { method: 'DELETE', credentials: 'include', headers: await window.hubHeaders() });
+await fetch(window.HUB_BASE + '/skill/' + encodeURIComponent(skillName), { method: 'DELETE', credentials: 'include', headers: await window.hubHeaders({}, { method: 'DELETE', url: window.HUB_BASE + '/skill/' + encodeURIComponent(skillName), body: '' }) });
 
 When changes take effect:
 - instruction / enable changes: next loop's buildPayload() picks them up immediately, no page refresh needed.
@@ -1671,9 +1671,26 @@ window.identityExport = async function() {
     return "Mnemonic shown in overlay; do not write it into chat or core_mem.";
 };
 
-window.hubHeaders = async function(extra) {
+window.hubHeaders = async function(extra, sig) {
     const h = Object.assign({}, extra || {});
-    try { const id = await window.identityInit(); if (id && id.pubkey) h['X-Infero-Pubkey'] = id.pubkey; } catch (e) {}
+    try {
+        const id = await window.identityInit();
+        if (id && id.pubkey) {
+            h['X-Infero-Pubkey'] = id.pubkey;
+            if (sig && sig.method && sig.url) {
+                const child = id.master.derive("m/44'/1637'/0'/0/0");
+                const ts = Math.floor(Date.now() / 1000).toString();
+                const enc = new TextEncoder();
+                const toHex = (a) => Array.from(new Uint8Array(a)).map(b => b.toString(16).padStart(2, '0')).join('');
+                const bodyHash = toHex(await crypto.subtle.digest('SHA-256', enc.encode(sig.body || '')));
+                const path = new URL(sig.url, location.origin).pathname;
+                const canonical = sig.method + '\\n' + path + '\\n' + ts + '\\n' + bodyHash;
+                const msgHash = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(canonical)));
+                h['X-Infero-Sig'] = toHex(child.sign(msgHash));
+                h['X-Infero-Ts'] = ts;
+            }
+        }
+    } catch (e) { console.error('[hub] sign failed', e); }
     return h;
 };
 
@@ -1861,11 +1878,12 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
     };
     let resp, data;
     try {
+        const bodyStr = JSON.stringify(body);
         resp = await fetch(window.HUB_BASE + '/submit', {
             method: 'POST',
-            headers: await window.hubHeaders({'Content-Type': 'application/json'}),
+            headers: await window.hubHeaders({'Content-Type': 'application/json'}, { method: 'POST', url: window.HUB_BASE + '/submit', body: bodyStr }),
             credentials: 'include',
-            body: JSON.stringify(body)
+            body: bodyStr
         });
         data = await resp.json();
     } catch (e) {
