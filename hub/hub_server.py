@@ -537,7 +537,7 @@ async def hub_list(sort: str = "hot", q: Optional[str] = None, limit: int = 5, o
         if full:
             rows = full
         else:
-            words = [w for w in q_low.split() if w]
+            words = [w for w in re.split(r'[\s_]+', q_low) if w]
             if words:
                 rows = [r for r in rows if any(w in blob_row(r) for w in words)]
             else:
