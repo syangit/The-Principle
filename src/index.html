@@ -1231,7 +1231,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             </div>
             <div id="row-token" class="settings-row">
                 <label>Token</label>
-                <input id="set-token" type="password" placeholder="API key">
+                <input id="set-token" type="text" placeholder="API key" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="-webkit-text-security:disc">
                 <span style="cursor:pointer;color:var(--text-dim);padding:3px 6px;border:1px solid var(--border);border-radius:3px;font-size:inherit;line-height:1" onclick="navigator.clipboard.writeText(document.getElementById('set-token').value).then(()=>{this.textContent='OK';setTimeout(()=>this.textContent='Copy',800)})" title="Copy">Copy</span>
             </div>
             <div class="settings-row">
