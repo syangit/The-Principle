@@ -2329,6 +2329,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     deviceLines += `\n    - Core loop (read or modify with caution):`;
                     deviceLines += `\n      async function loop() { await perceive(); const B = await infer(); await act(B); ... }`;
                     deviceLines += `\n    - Being ID: ${currentBeingId}`;
+                    deviceLines += `\n    - Your mind: ${getActiveModel()} (provider: ${settings.provider})${settings.provider === 'infero' ? ' — routed via infero relay in Tokyo (ap-northeast-1)' : ''}`;
                     deviceLines += `\n    - Memory: IndexedDB('GenesisDB', store='beings', keyPath='id') — each record is {id, ...fields}`;
                     deviceLines += `\n      ${currentBeingId} → metadata object`;
                     deviceLines += `\n      ${currentBeingId}/consciousness.txt → {id, value} — consciousness stream`;
