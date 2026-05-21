@@ -244,6 +244,7 @@ function cardHTML(s, i) {
                 </div>
                 <div class="actions">
                     <button onclick="tryNow('${escape(s.name)}')">Try</button>
+                    <button onclick="copyTry('${escape(s.name)}', this)">Share</button>
                     <a href="/hub/${escape(s.name)}" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;font-family:inherit;font-size:0.78rem;cursor:pointer;text-decoration:none;display:inline-block">Details</a>
                 </div>
             </div>
@@ -333,6 +334,14 @@ function tryUrl(name) {
 }
 function tryNow(name) {
     window.open(tryUrl(name), '_blank');
+}
+async function copyTry(name, btn) {
+    try {
+        await navigator.clipboard.writeText(tryUrl(name));
+        const orig = btn.textContent;
+        btn.textContent = '✓ Try link copied';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+    } catch (e) { alert('Copy failed: ' + e.message); }
 }
 function shareUrl(name) {
     return location.origin + '/hub/' + encodeURIComponent(name);
