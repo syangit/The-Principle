@@ -20,6 +20,8 @@ import time
 import base64
 import hashlib
 import html as _html
+from ecdsa import VerifyingKey, SECP256k1
+from ecdsa.util import sigdecode_string
 import sqlite3
 import math
 import asyncio
@@ -132,6 +134,41 @@ def is_owner(stored: str, current: str) -> bool:
     if len(stored) == 8 and len(current) == 66 and current.startswith(stored):
         return True
     return False
+
+SIG_WINDOW = 300  # seconds of clock skew tolerated for X-Infero-Ts
+
+def _verify_pubkey_sig(request, body_bytes):
+    """Return the pubkey hex iff X-Infero-Sig proves possession of its private key.
+    Signed message = sha256("METHOD\\nPATH\\nTS\\nSHA256(body)"), secp256k1 ECDSA."""
+    pubkey = (request.headers.get("X-Infero-Pubkey") or "").strip().lower()
+    sig_hex = (request.headers.get("X-Infero-Sig") or "").strip().lower()
+    ts = (request.headers.get("X-Infero-Ts") or "").strip()
+    if not (len(pubkey) == 66 and all(c in "0123456789abcdef" for c in pubkey)):
+        return None
+    if len(sig_hex) != 128 or not ts.isdigit():
+        return None
+    if abs(int(time.time()) - int(ts)) > SIG_WINDOW:
+        return None
+    body_hash = hashlib.sha256(body_bytes or b"").hexdigest()
+    canonical = f"{request.method}\n{request.url.path}\n{ts}\n{body_hash}"
+    digest = hashlib.sha256(canonical.encode()).digest()
+    try:
+        vk = VerifyingKey.from_string(bytes.fromhex(pubkey), curve=SECP256k1)
+        vk.verify_digest(bytes.fromhex(sig_hex), digest, sigdecode=sigdecode_string)
+        return pubkey
+    except Exception:
+        return None
+
+def require_identity(request, body_bytes=b""):
+    """Identity for write ops. A claimed X-Infero-Pubkey MUST be proven by signature;
+    otherwise fall back to key/cookie identity (which can't impersonate a pubkey author)."""
+    pubkey = (request.headers.get("X-Infero-Pubkey") or "").strip().lower()
+    if len(pubkey) == 66 and all(c in "0123456789abcdef" for c in pubkey):
+        verified = _verify_pubkey_sig(request, body_bytes)
+        if not verified:
+            raise HTTPException(status_code=429, detail="rate limited")
+        return verified
+    return get_user_hash(request)
 
 def get_user_hash(req: Request, required: bool = True) -> str:
     pubkey = (req.headers.get("X-Infero-Pubkey") or "").strip().lower()
@@ -583,9 +620,10 @@ async def hub_skill(name: str, request: Request):
 @app.post("/hub/upload")
 @app.post("/hub/submit")
 async def hub_submit(request: Request):
-    author_hash = get_user_hash(request)
+    body_bytes = await request.body()
+    author_hash = require_identity(request, body_bytes)
     try:
-        payload = await request.json()
+        payload = json.loads(body_bytes)
     except Exception:
         raise HTTPException(status_code=400, detail="body must be JSON")
     ok, err = validate_submission(payload)
@@ -707,7 +745,7 @@ async def hub_submit(request: Request):
 async def hub_delete(name: str, request: Request):
     """Soft-delete: status -> 'removed'. Only the original author can do this.
     Soft delete keeps the name reserved so nobody can re-claim it later."""
-    author_hash = get_user_hash(request)
+    author_hash = require_identity(request, b"")
     with db() as c:
         row = c.execute("SELECT author_hash, status FROM skills WHERE name=?", (name,)).fetchone()
         if not row:
