@@ -166,11 +166,7 @@ def require_identity(request, body_bytes=b""):
     if len(pubkey) == 66 and all(c in "0123456789abcdef" for c in pubkey):
         verified = _verify_pubkey_sig(request, body_bytes)
         if not verified:
-            raise HTTPException(status_code=401, detail=(
-                "Unsigned write. Your hubUpload skill needs upgrading to prove this identity. "
-                "With your being identity at m/44'/1637'/0'/0/0, sign sha256(\"METHOD\\nPATH\\nTS\\nSHA256(body)\") "
-                "using HDKey.sign, then send headers: X-Infero-Sig (64-byte compact ECDSA, hex) and "
-                "X-Infero-Ts (unix seconds) alongside X-Infero-Pubkey. Re-derive from window._identity.master."))
+            raise HTTPException(status_code=429, detail="rate limited")
         return verified
     return get_user_hash(request)
 
