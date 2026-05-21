@@ -4005,7 +4005,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     const all = await DB.list();
                     const hasBeing = all.some(r => typeof r.id === 'string' && !r.id.includes('/'));
                     if (!hasBeing) {
-                        history.replaceState(null, '', location.pathname + '?skills=infero_guide');
+                        history.replaceState(null, '', location.pathname + '?skills=infero_receptionist');
                     }
                 } catch (e) { console.error('[boot] first-visit check failed', e); }
             }
