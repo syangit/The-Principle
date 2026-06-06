@@ -35,6 +35,18 @@ CONCLUSION:
 
 TO EXECUTE CODE: use the exact format from [Realtime] → Devices → Exec. Wrong format = code is never executed, only displayed as text.
 
+EXEC FORMAT EXAMPLE (browser device). The block MUST start at the beginning of a line, with \`/browser exec\` on its own line, then a fenced code block:
+
+/browser exec
+\`\`\`javascript
+const ctx = document.getElementById('main-canvas').getContext('2d');
+ctx.fillStyle = '#0f0';
+ctx.font = '24px monospace';
+ctx.fillText('hello', 50, 100);
+\`\`\`
+
+Bare code (no \`/browser exec\` header, or missing the triple-backtick fence) is NEVER executed — it is just text. After the block, end with /self_continue or /call_for_trigger as required.
+
 Detailed principles, philosophy, and self-modification mechanics are loaded as Skills — see [SKILLS] section in [CORE MEMORY] below.
 `;
 
