@@ -326,7 +326,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
 
         async function buildPayload() {
             const STOP_WORDS = ['\nSystem - [', '\n[System Environment]', '\n**Digital Being'];
-            const supportsVision = MODEL_LIST[settings.model]?.vision !== false;
+            const supportsVision = settings.vision !== 'off' && MODEL_LIST[settings.model]?.vision !== false;
             const canvasImage = supportsVision ? await getCanvasImage() : null;
             const stableHead = await loadStableHead();
             const beingPrefix = `**Digital Being - [${new Date().toLocaleString()}]**\n`;
@@ -1237,6 +1237,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
             <div class="settings-row">
                 <label>Vision</label>
                 <select id="set-vision">
+                    <option value="off">Off (no image input)</option>
                     <option value="canvas">Canvas only</option>
                     <option value="half">Pageshot (half)</option>
                     <option value="full">Pageshot (full)</option>
@@ -2321,8 +2322,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             const canvasRect = container.getBoundingClientRect();
             const chatRect = chatEl ? chatEl.getBoundingClientRect() : null;
             const panelName = (chatRect && canvasRect.top < chatRect.top - 10) ? 'top panel' : 'right panel';
-            const visionLabels = { canvas: 'canvas.toDataURL (canvas element only)', half: `html2canvas pageshot (${panelName}: canvas + html-div)`, full: 'html2canvas pageshot (full page: document.body)', native: 'getDisplayMedia (screen capture, user authorized)' };
-            const supportsVision = MODEL_LIST[settings.model]?.vision !== false;
+            const visionLabels = { off: 'disabled (no image input)', canvas: 'canvas.toDataURL (canvas element only)', half: `html2canvas pageshot (${panelName}: canvas + html-div)`, full: 'html2canvas pageshot (full page: document.body)', native: 'getDisplayMedia (screen capture, user authorized)' };
+            const supportsVision = settings.vision !== 'off' && MODEL_LIST[settings.model]?.vision !== false;
             const visionInfo = supportsVision ? (visionLabels[settings.vision] || settings.vision) : 'disabled (model does not support image input)';
 
             const ua = navigator.userAgent;
