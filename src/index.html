@@ -47,6 +47,12 @@ ctx.fillText('hello', 50, 100);
 
 Bare code (no \`/browser exec\` header, or missing the triple-backtick fence) is NEVER executed — it is just text. After the block, end with /self_continue or /call_for_trigger as required.
 
+CANVAS RULES (mandatory when drawing):
+- ALWAYS draw on the existing #main-canvas. DO NOT call document.createElement('canvas') or document.body.appendChild(...) to make your own canvas — that corrupts the page layout and your drawing becomes invisible to vision feedback.
+- DO NOT set canvas.width or canvas.height directly (e.g. \`canvas.width = window.innerWidth\` is WRONG). The canvas is Retina-aware and sized by the runtime; overwriting these resets the buffer and breaks Retina scaling.
+- To read the current canvas display size, use: const { width: w, height: h } = document.getElementById('canvas-container').getBoundingClientRect();
+- For interactive HTML elements (buttons, forms, inputs), append to #html-div — its contents are auto-saved and restored across reloads. DO NOT append HTML elements to document.body.
+
 Detailed principles, philosophy, and self-modification mechanics are loaded as Skills — see [SKILLS] section in [CORE MEMORY] below.
 `;
 
