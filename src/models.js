@@ -55,6 +55,8 @@ window.MODELS = {
       "infero": "claude-sonnet-5", "anthropic": "claude-sonnet-5", "openrouter": "anthropic/claude-sonnet-5" , "nanogpt": "anthropic/claude-sonnet-5"}},
     { "name": "claude-sonnet-4.6", "format": "anthropic", "from": {
       "anthropic": "claude-sonnet-4-6", "openrouter": "anthropic/claude-sonnet-4.6" , "nanogpt": "anthropic/claude-sonnet-4.6"}},
+    { "name": "claude-haiku-5.5", "format": "anthropic", "maxContext": 1000000, "compress": { "at": 128000, "head": 0.1, "tail": 0.6 }, "thinkingMode": "adaptive", "from": {
+      "infero": "claude-haiku-5-5", "anthropic": "claude-haiku-5-5", "openrouter": "anthropic/claude-haiku-5.5" , "nanogpt": "anthropic/claude-haiku-5.5"}},
     { "name": "claude-haiku-4.5", "format": "anthropic", "from": {
       "anthropic": "claude-haiku-4-5", "openrouter": "anthropic/claude-haiku-4.5" }},
     { "name": "deepseek-v4.1-flash", "format": "openai", "vision": false, "maxContext": 1000000, "from": {
