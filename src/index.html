@@ -1565,6 +1565,15 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
         }
         function saveSettingsToStorage(s) { localStorage.setItem('genesis_settings', JSON.stringify(s)); }
         var settings = loadSettings();
+        // Another tab saved settings: adopt them, so this tab's next save (each save writes the
+        // whole object) doesn't write back a stale copy and drop, say, a device paired there.
+        window.addEventListener('storage', e => {
+            if (e.key !== 'genesis_settings' && e.key !== null) return;
+            const fresh = loadSettings();
+            for (const k of Object.keys(settings)) if (!(k in fresh)) delete settings[k];
+            Object.assign(settings, fresh);
+            try { renderDeviceList(); } catch (_) {}
+        });
         // Overload fallback chain (anthropic API ids), mirrors agent.py _OVERLOAD_CHAIN.
         const OVERLOAD_CHAIN = ['claude-fable-5', 'claude-opus-5', 'claude-opus-4-8'];
         function nextOverloadModel(current) {
@@ -2399,8 +2408,37 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
 
         // Switching reloads the page: the old being's skill code (timers, observers,
         // listeners, prototype patches) can't keep running and act on the new being.
+        // One tab per being: a tab holds a Web Lock on the being it shows for the life of the
+        // page (switching reloads, which releases it), so two tabs never run the same being.
+        const _beingLockName = id => 'genesis-being:' + id;
+        function _lockBeing(id, waitMs = 0) {
+            if (!navigator.locks) return Promise.resolve(true);
+            return new Promise(resolve => {
+                // waitMs: the tab we just navigated away from may still be releasing this lock
+                const opts = waitMs ? { signal: AbortSignal.timeout(waitMs) } : { ifAvailable: true };
+                navigator.locks.request(_beingLockName(id), opts, lock => {
+                    resolve(!!lock);
+                    if (lock) return new Promise(() => {});   // held until the page unloads
+                }).catch(() => resolve(false));               // timed out: open in another tab
+            });
+        }
+        async function _beingOpenElsewhere(id) {
+            if (!navigator.locks || id === currentBeingId) return false;
+            const { held } = await navigator.locks.query();
+            return held.some(l => l.name === _beingLockName(id));
+        }
+        function _beingLabel(id) {
+            const opt = [...beingSelect.options].find(o => o.value === id);
+            return opt ? `"${opt.textContent}"` : 'That being';
+        }
+
         async function switchBeing(id) {
             if (id === currentBeingId) return;
+            if (await _beingOpenElsewhere(id)) {
+                beingSelect.value = currentBeingId;
+                appendMsgUI('system', `${_beingLabel(id)} is open in another tab. Switch to that tab to use it.`);
+                return;
+            }
             try {
                 await leaveBeing();
             } catch (e) {
@@ -2472,6 +2510,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             }
             const fresh = await window.identityCreateFresh();
             currentBeingId = fresh.pubkey;
+            await _lockBeing(currentBeingId);
             delete window._identity;
             consciousness = '';
             cachedLength = 0;
@@ -2560,17 +2599,22 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             event.target.value = '';
         }
 
+        // Open the requested being, else the most recent one, skipping beings open in other tabs.
         async function initApp(requested) {
-            const beings = (await DB.list()).filter(s => !s.id.includes('/'));
-            if (requested && beings.find(s => s.id === requested)) currentBeingId = requested;
-            if (beings.length === 0) {
-                await createBeing();
-            } else {
-                if (!currentBeingId || !beings.find(s => s.id === currentBeingId)) {
-                    currentBeingId = beings.sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+            const beings = (await DB.list()).filter(s => !s.id.includes('/'))
+                .sort((a, b) => b.updatedAt - a.updatedAt).map(s => s.id);
+            const wanted = beings.includes(requested) ? requested : null;
+            const order = wanted ? [wanted, ...beings.filter(id => id !== wanted)] : beings;
+            for (const id of order) {
+                if (!(await _lockBeing(id, id === wanted ? 1500 : 0))) continue;
+                await loadBeing(id);
+                if (id !== order[0]) {
+                    appendMsgUI('system', `${_beingLabel(order[0])} is open in another tab, so this tab opened ${_beingLabel(id)}.`);
                 }
-                await loadBeing(currentBeingId);
+                return;
             }
+            await createBeing();
+            if (beings.length) appendMsgUI('system', 'Every being is already open in another tab, so this tab created a new one.');
         }
 
         var _justReloaded = false;
