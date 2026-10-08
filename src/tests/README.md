@@ -38,3 +38,15 @@ python3 src/tests/test_shell_timeout.py
 ```
 
 `TEST_PLAN.md` holds the manual UI checks (self-loop, theme switch).
+
+## Multi-being isolation (Playwright — local, no network keys)
+
+Checks that beings sharing one browser stay separate: switching mid-loop, switching right after a
+write, leftover skill code, multiple tabs, and IndexedDB access between beings. Uses a local fake LLM,
+so it needs no API key. Every check currently **fails** (known bugs); see `multi_being_isolation/README.md`
+for the issues, repro steps and last results.
+
+```bash
+pip install playwright        # + Playwright's Chromium, or CHROME=/path/to/chromium
+python3 src/tests/multi_being_isolation/multi_being_isolation_test.py [--json results.json]
+```
