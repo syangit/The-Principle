@@ -47,8 +47,10 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
 
         async function loop() {
             if (settings.hostDevice !== 'this browser') return;  // not our turn
+            if (_stopRequested) return;                           // leaving this being
             try {
                 await perceive();                                 // Res Extensa, passio
+                if (_stopRequested) return;
                 const B = await infer();                          // Res Cogitans
                 await act(B);                                     // Res Extensa, actio
 
@@ -58,6 +60,7 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
                     _pendingHandoff = null;
                     return;
                 }
+                if (_stopRequested) return;  // finish the turn (act), but don't start another
 
                 if (!B.trim()) { console.log('[loop] stop: empty response'); return; }
                 // Check the tail of the raw output (after last code block) for stop/continue signals
@@ -2181,6 +2184,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         var cacheName = null;            // Gemini cache ID
         var _cachedStableHead = null;    // in-memory only; gemini cache invalidates if stableHead changes mid-session
         var loopRunning = false;
+        var _loopPromise = null;         // the running loop() chain, so leaveBeing() can await its end
+        var _stopRequested = false;      // set by leaveBeing(); loop() checks it between steps
         var currentUserInput = null;
         var currentAbortController = null;
         var _saveBeingTimer = null;
@@ -2365,7 +2370,35 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             }
         }
 
+        // Stop this being's loop and persist it before another being takes over the page.
+        // Paused, not discarded: a cancelled turn's input stays in its consciousness.
+        async function leaveBeing() {
+            beingSelect.disabled = true;
+            clearTimeout(dispatchTimer); dispatchTimer = null;
+            clearTimeout(autoInferTimer); autoInferTimer = null;
+            currentUserInput = null;
+            if (loopRunning) {
+                setStatus('Stopping...');
+                _stopRequested = true;
+                if (currentAbortController) currentAbortController.abort();
+                const running = _loopPromise;
+                if (running) await running.catch(() => {});
+                _stopRequested = false;
+            }
+            _pendingHandoff = null;
+            window._overloadModel = null;
+            if (currentBeingId) await saveBeing();
+        }
+
         async function switchBeing(id) {
+            if (id === currentBeingId) return;
+            try {
+                await leaveBeing();
+                await loadBeing(id);
+            } finally { beingSelect.disabled = false; }
+        }
+
+        async function loadBeing(id) {
             currentBeingId = id;
             delete window._identity;
             try {
@@ -2378,7 +2411,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     try { (0, eval)(js); console.log('[skill] code reloaded:', s.name); }
                     catch (e) { console.error('[skill] code eval failed:', s.name, e); }
                 }
-            } catch (e) { console.error('[switchBeing] skill init failed', e); }
+            } catch (e) { console.error('[loadBeing] skill init failed', e); }
             const being = await DB.get(id);
             const consciousnessRecord = await DB.get(`${id}/consciousness.txt`);
             if (consciousnessRecord) {
@@ -2409,6 +2442,13 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         }
 
         async function newBeing() {
+            try {
+                await leaveBeing();
+                await createBeing();
+            } finally { beingSelect.disabled = false; }
+        }
+
+        async function createBeing() {
             if (typeof window.identityCreateFresh !== 'function') {
                 const idSkill = DEFAULT_SKILLS.find(s => s.name === 'identity_seed');
                 if (!idSkill || !idSkill.code) throw new Error('identity_seed default skill missing');
@@ -2438,10 +2478,10 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     try { (0, eval)(js); console.log('[skill] code reloaded:', s.name); }
                     catch (e) { console.error('[skill] code eval failed:', s.name, e); }
                 }
-            } catch (e) { console.error('[newBeing] skill init failed', e); }
+            } catch (e) { console.error('[createBeing] skill init failed', e); }
             // Auto-install the curated set of Hub skills into this fresh Being.
             // Runs after the local defaults are seeded + eval'd so hubInstall/HUB_BASE exist.
-            try { await installDefaultHubSkills(); } catch (e) { console.error('[newBeing] hub skill load failed', e); }
+            try { await installDefaultHubSkills(); } catch (e) { console.error('[createBeing] hub skill load failed', e); }
             renderHistory();
             // If remote host is online, handoff new being; otherwise auto-infer locally
             const remoteHost = settings.hostDevice;
@@ -2454,6 +2494,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
 
         async function duplicateBeing() {
             if (!confirm('Fork this being? Dynamic UI elements will need to be redrawn by waking the AI.')) return;
+            await leaveBeing();
+            beingSelect.disabled = false;
             const sourceId = currentBeingId;
             currentBeingId = 'being_fork_' + Date.now();
             const note = `\n\n[System] Being forked from ${sourceId} → ${currentBeingId} at ${new Date().toLocaleString()}\n\n`;
@@ -2465,6 +2507,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
 
         async function deleteBeing() {
             if(confirm('Destroy this Being? This cannot be undone.')) {
+                await leaveBeing();
+                beingSelect.disabled = false;
                 await DB.del(`${currentBeingId}/consciousness.txt`);
                 await DB.del(currentBeingId);
                 currentBeingId = null;
@@ -2494,10 +2538,12 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                     event.target.value = '';
                     return;
                 }
+                await leaveBeing();
                 for (const r of records) await DB.put(r);
-                currentBeingId = sourceId;
-                await switchBeing(sourceId);
+                await loadBeing(sourceId);
+                beingSelect.disabled = false;
             } catch(e) {
+                beingSelect.disabled = false;
                 console.error('[importBeing]', e);
                 alert(`Failed to import being: ${e.message}`);
             }
@@ -2507,12 +2553,12 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         async function initApp() {
             const beings = (await DB.list()).filter(s => !s.id.includes('/'));
             if (beings.length === 0) {
-                await newBeing();
+                await createBeing();
             } else {
                 if (!currentBeingId || !beings.find(s => s.id === currentBeingId)) {
                     currentBeingId = beings.sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
                 }
-                await switchBeing(currentBeingId);
+                await loadBeing(currentBeingId);
             }
         }
 
@@ -4253,7 +4299,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 loopRunning = true;
                 updateSendBtn();
                 setStatus('Inferring...');
-                loop().finally(() => { loopRunning = false; updateSendBtn(); setStatus('Ready'); if (currentUserInput) trigger(); });
+                _loopPromise = loop().finally(() => { loopRunning = false; updateSendBtn(); setStatus('Ready'); if (currentUserInput) trigger(); });
             } else {
                 sendMessage();
             }
@@ -4337,7 +4383,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 loopRunning = true;
                 updateSendBtn();
                 setStatus('Inferring...');
-                loop().finally(() => {
+                _loopPromise = loop().finally(() => {
                     loopRunning = false;
                     updateSendBtn();
                     setStatus('Ready');
@@ -4355,7 +4401,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 loopRunning = true;
                 updateSendBtn();
                 setStatus('Inferring...');
-                loop().finally(() => { loopRunning = false; updateSendBtn(); setStatus('Ready'); if (currentUserInput) trigger(); });
+                _loopPromise = loop().finally(() => { loopRunning = false; updateSendBtn(); setStatus('Ready'); if (currentUserInput) trigger(); });
             }, 3000);
         }
 
@@ -4367,8 +4413,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             const newFlag = params.has('new');
             const hubInstallNames = skillsParam ? skillsParam.split(',').map(s => s.trim()).filter(Boolean) : [];
             if (newFlag && !hubInstallNames.length) {
-                try { await newBeing(); }
-                catch (e) { console.error('[boot] newBeing failed', e); }
+                try { await createBeing(); }
+                catch (e) { console.error('[boot] createBeing failed', e); }
                 try {
                     if (currentBeingId) {
                         await seedDefaultSkills(currentBeingId);
@@ -4388,9 +4434,9 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             } else if (hubInstallNames.length) {
                 // Hub-experience path: never load the existing Being. Go straight to a fresh one
                 // so its skills (including any cached `code`) eval against the new context, not
-                // a stale one. newBeing() seeds defaults and evals cached code internally.
-                try { await newBeing(); }
-                catch (e) { console.error('[boot] newBeing for hub experience failed', e); }
+                // a stale one. createBeing() seeds defaults and evals cached code internally.
+                try { await createBeing(); }
+                catch (e) { console.error('[boot] createBeing for hub experience failed', e); }
                 const results = [];
                 for (const n of hubInstallNames) {
                     try { results.push({ name: n, ok: !!(await window.hubInstall(n)) }); }

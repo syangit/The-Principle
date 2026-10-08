@@ -57,12 +57,15 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         parts = [f"ANSWER-{mark} part1 ", "part2 ", "done.\n\n/call_for_human"]
-        for p in parts:
-            time.sleep(delay / len(parts))
-            chunk = {"candidates": [{"content": {"parts": [{"text": p}]}}]}
-            self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode()); self.wfile.flush()
-        self.wfile.write(b'data: {"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}\n\n')
-        self.wfile.flush()
+        try:
+            for p in parts:
+                time.sleep(delay / len(parts))
+                chunk = {"candidates": [{"content": {"parts": [{"text": p}]}}]}
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode()); self.wfile.flush()
+            self.wfile.write(b'data: {"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}\n\n')
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the page aborted the stream (e.g. switching beings mid-reply)
 
 
 def start_server():
@@ -169,9 +172,12 @@ def main():
             time.sleep(4)   # past the 3 s save debounce, mid-stream
             running = pg.evaluate("() => loopRunning")
             switch(pg, B); settle(pg)
-            where = holders(pg, "ANSWER-SLOW1", ids)
-            check(1, "A's reply is saved in A, not B", where == ["A"],
-                  f"loop running at switch={running}; reply saved in {where or 'none'}")
+            # Switching pauses A: its in-flight reply is cancelled, its prompt stays in A.
+            reply = holders(pg, "ANSWER-SLOW1", ids)
+            prompt = holders(pg, "TASK-SLOW1", ids)
+            check(1, "nothing of A's turn lands in B; A keeps its prompt",
+                  "B" not in reply and prompt == ["A"],
+                  f"loop running at switch={running}; reply saved in {reply or 'none'}, prompt in {prompt or 'none'}")
 
             print("\n[2] Switching within ~3 s of a write loses it")
             switch(pg, A); settle(pg)
