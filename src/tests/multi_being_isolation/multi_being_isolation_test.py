@@ -75,11 +75,11 @@ def start_server():
 
 
 # --- Page helpers -------------------------------------------------------------
-def route_filter(route):
-    u = route.request.url
-    if u.startswith(BASE) or any(h in u for h in ALLOWED_HOSTS):
-        return route.continue_()
-    return route.abort()
+# Every other host (hub, relay, ...) fails DNS inside Chromium. Blocking in the browser rather
+# than with ctx.route() matters: the sync API only serves intercepted requests while Python is
+# inside a Playwright call, so routed requests would stall the page during time.sleep().
+CHROME_ARGS = ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, "
+               + ", ".join(f"EXCLUDE {h}" for h in ALLOWED_HOSTS)]
 
 
 def wait_idle(pg, timeout=30):
@@ -98,8 +98,41 @@ def settle(pg):
     time.sleep(0.3)
 
 
+def wait_until(pg, js, arg=None, timeout=60):
+    """Poll a JS predicate, surviving page reloads (an evaluate during navigation throws).
+    Not wait_for_function: the page's cancelAllAnimations() cancels every
+    requestAnimationFrame, including the one Playwright's default polling uses."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            if pg.evaluate(js, arg):
+                return
+        except Exception:
+            pass   # mid-navigation
+        time.sleep(0.2)
+    raise RuntimeError(f"timed out waiting for {js}")
+
+
+BOOTED = "(window._bootDone !== false && !!currentBeingId)"   # code without the flag: being loaded
+
+
+def wait_boot(pg):
+    wait_until(pg, "() => " + BOOTED)
+
+
 def switch(pg, bid):
-    pg.evaluate("id => switchBeing(id)", bid)
+    """Switch through the being picker, like a user. Works whether or not switching reloads."""
+    if pg.evaluate("() => currentBeingId") == bid:
+        return
+    pg.select_option("#being-select", bid)
+    wait_until(pg, "id => currentBeingId === id && " + BOOTED + " && !beingSelect.disabled", bid)
+
+
+def new_being(pg):
+    """Click the New Being button and wait for the fresh being."""
+    old = pg.evaluate("() => currentBeingId")
+    pg.click('button[title="New Being"]')
+    wait_until(pg, "id => currentBeingId !== id && " + BOOTED, old)
 
 
 def stored(pg, bid):
@@ -115,21 +148,20 @@ def open_page(ctx, url):
     pg = ctx.new_page()
     pg.on("pageerror", lambda e: print("    [pageerror]", str(e)[:150]))
     pg.goto(url)
-    pg.wait_for_function("() => typeof currentBeingId === 'string' && currentBeingId.length > 0",
-                         timeout=30000)
+    wait_boot(pg)
     return pg
 
 
 def launch(p):
     exe = os.environ.get("CHROME")
     if exe:
-        return p.chromium.launch(executable_path=exe, headless=True)
+        return p.chromium.launch(executable_path=exe, headless=True, args=CHROME_ARGS)
     try:
-        return p.chromium.launch(headless=True)
+        return p.chromium.launch(headless=True, args=CHROME_ARGS)
     except Exception:
         for exe in ("/usr/bin/chromium-browser", "/usr/bin/chromium", "/usr/bin/google-chrome"):
             if os.path.exists(exe):
-                return p.chromium.launch(executable_path=exe, headless=True)
+                return p.chromium.launch(executable_path=exe, headless=True, args=CHROME_ARGS)
         raise
 
 
@@ -152,7 +184,6 @@ def main():
         with sync_playwright() as p:
             br = launch(p)
             ctx = br.new_context()
-            ctx.route("**/*", route_filter)
             ctx.add_init_script("if (!localStorage.getItem('genesis_settings')) "
                                 f"localStorage.setItem('genesis_settings', {json.dumps(json.dumps(SETTINGS))});")
 
@@ -160,7 +191,7 @@ def main():
             pg = open_page(ctx, f"{BASE}/index.html?new")
             time.sleep(4); settle(pg)
             A = pg.evaluate("() => currentBeingId")
-            pg.evaluate("() => newBeing()")
+            new_being(pg)
             time.sleep(4); settle(pg)
             B = pg.evaluate("() => currentBeingId")
             ids = {"A": A, "B": B}
@@ -206,7 +237,7 @@ def main():
             time.sleep(2)
             opened = "A" if pg2.evaluate("() => currentBeingId") == A else "B"
             check("4a", "a new tab opened with ?being=B opens B", opened == "B",
-                  f"new tab opened {opened}, the being tab 1 is on")
+                  f"new tab opened {opened} (tab 1 is on A)")
             pg.evaluate("() => { settings.devices = {TestDevice: {online: false}}; saveSettingsToStorage(settings); }")
             pg2.evaluate("() => saveSettingsToStorage(settings)")
             devices = pg.evaluate("() => Object.keys(JSON.parse(localStorage.genesis_settings).devices || {})")

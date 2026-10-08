@@ -2390,12 +2390,25 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             if (currentBeingId) await saveBeing();
         }
 
+        // URL that boots straight into a being (?being=<id>) or a fresh one (?new).
+        function _beingUrl(id) {
+            const u = new URL(location.href);
+            u.search = id ? '?being=' + encodeURIComponent(id) : '?new';
+            return u.toString();
+        }
+
+        // Switching reloads the page: the old being's skill code (timers, observers,
+        // listeners, prototype patches) can't keep running and act on the new being.
         async function switchBeing(id) {
             if (id === currentBeingId) return;
             try {
                 await leaveBeing();
-                await loadBeing(id);
-            } finally { beingSelect.disabled = false; }
+            } catch (e) {
+                beingSelect.disabled = false;
+                beingSelect.value = currentBeingId;
+                throw e;
+            }
+            location.assign(_beingUrl(id));
         }
 
         async function loadBeing(id) {
@@ -2444,8 +2457,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         async function newBeing() {
             try {
                 await leaveBeing();
-                await createBeing();
-            } finally { beingSelect.disabled = false; }
+            } catch (e) { beingSelect.disabled = false; throw e; }
+            location.assign(_beingUrl(null));
         }
 
         async function createBeing() {
@@ -2495,24 +2508,21 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         async function duplicateBeing() {
             if (!confirm('Fork this being? Dynamic UI elements will need to be redrawn by waking the AI.')) return;
             await leaveBeing();
-            beingSelect.disabled = false;
             const sourceId = currentBeingId;
             currentBeingId = 'being_fork_' + Date.now();
             const note = `\n\n[System] Being forked from ${sourceId} → ${currentBeingId} at ${new Date().toLocaleString()}\n\n`;
             consciousness += note;
             await saveBeing();
             try { await seedDefaultSkills(currentBeingId); } catch (e) { console.error('[duplicateBeing] seed failed', e); }
-            renderHistory();
+            location.assign(_beingUrl(currentBeingId));
         }
 
         async function deleteBeing() {
             if(confirm('Destroy this Being? This cannot be undone.')) {
                 await leaveBeing();
-                beingSelect.disabled = false;
                 await DB.del(`${currentBeingId}/consciousness.txt`);
                 await DB.del(currentBeingId);
-                currentBeingId = null;
-                await initApp();
+                location.assign(location.pathname);   // boot picks the most recent being
             }
         }
 
@@ -2540,8 +2550,8 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 }
                 await leaveBeing();
                 for (const r of records) await DB.put(r);
-                await loadBeing(sourceId);
-                beingSelect.disabled = false;
+                location.assign(_beingUrl(sourceId));
+                return;
             } catch(e) {
                 beingSelect.disabled = false;
                 console.error('[importBeing]', e);
@@ -2550,8 +2560,9 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             event.target.value = '';
         }
 
-        async function initApp() {
+        async function initApp(requested) {
             const beings = (await DB.list()).filter(s => !s.id.includes('/'));
+            if (requested && beings.find(s => s.id === requested)) currentBeingId = requested;
             if (beings.length === 0) {
                 await createBeing();
             } else {
@@ -4406,6 +4417,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         }
 
         async function boot() {
+            window._bootDone = false;
             await DB.open();   // bootstrap IDB schema (v3 + 'beings' store) before any branch
             await loadModels();
             const params = new URLSearchParams(location.search);
@@ -4415,22 +4427,6 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             if (newFlag && !hubInstallNames.length) {
                 try { await createBeing(); }
                 catch (e) { console.error('[boot] createBeing failed', e); }
-                try {
-                    if (currentBeingId) {
-                        await seedDefaultSkills(currentBeingId);
-                        const skills = await DB.listSkills(currentBeingId);
-                        for (const s of skills) {
-                            if (!s || s.enable !== true) continue;
-                            const js = skillJsCode(s.code);
-                            if (!js) continue;
-                            try { (0, eval)(js); console.log("[skill] code reloaded:", s.name); }
-                            catch (e) { console.error("[skill] code eval failed:", s.name, e); }
-                        }
-                    }
-                } catch (e) { console.error("[boot] skill init failed", e); }
-                const url = new URL(location.href);
-                url.searchParams.delete('new');
-                history.replaceState(null, '', url.toString());
             } else if (hubInstallNames.length) {
                 // Hub-experience path: never load the existing Being. Go straight to a fresh one
                 // so its skills (including any cached `code`) eval against the new context, not
@@ -4454,29 +4450,16 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                         (bad.length ? '<div style="margin-top:4px;color:#f88">✗ failed: ' + bad.map(x => '<code>' + x + '</code>').join(', ') + '</div>' : '');
                     div.insertBefore(card, div.firstChild);
                 }
-                const url = new URL(location.href);
-                url.searchParams.delete('skills');
-                history.replaceState(null, '', url.toString());
             } else {
-                await initApp();
-                try {
-                    if (currentBeingId) {
-                        await seedDefaultSkills(currentBeingId);
-                        const skills = await DB.listSkills(currentBeingId);
-                        for (const s of skills) {
-                            if (!s || s.enable !== true) continue;
-                            const js = skillJsCode(s.code);
-                            if (!js) continue;
-                            try { (0, eval)(js); console.log("[skill] code reloaded:", s.name); }
-                            catch (e) { console.error("[skill] code eval failed:", s.name, e); }
-                        }
-                    }
-                } catch (e) { console.error("[boot] skill init failed", e); }
+                await initApp(params.get('being'));
             }
+            // Keep the being in the URL so a reload (or a bookmark) reopens it
+            if (currentBeingId) history.replaceState(null, '', _beingUrl(currentBeingId));
             initRelay();
             if (!/Mobi|Android/i.test(navigator.userAgent)) input.focus();
             updateSendBtn();
             if (!consciousness) scheduleAutoInfer();
+            window._bootDone = true;   // boot finished (tests wait on this after a switch reload)
         }
 
         (async () => {
