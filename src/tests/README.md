@@ -43,8 +43,8 @@ python3 src/tests/test_shell_timeout.py
 
 Checks that beings sharing one browser stay separate: switching mid-loop, switching right after a
 write, leftover skill code, multiple tabs, and IndexedDB access between beings. Uses a local fake LLM,
-so it needs no API key. Every check currently **fails** (known bugs); see `multi_being_isolation/README.md`
-for the issues, repro steps and last results.
+so it needs no API key. Issue 5 (no storage boundary between beings) is a known failure; everything
+else should pass. See `multi_being_isolation/README.md` for the issues, fixes, repro steps and results.
 
 ```bash
 pip install playwright        # + Playwright's Chromium, or CHROME=/path/to/chromium
