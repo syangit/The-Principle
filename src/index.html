@@ -3830,6 +3830,11 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                         saveSettingsToStorage(settings);
                         renderDeviceList();
                         setStatus('Remote');
+                    } else if (!remoteConsciousness && !window._remoteLoopRunning) {
+                        // The host doesn't have this being yet: switching beings reloads the page, so
+                        // boot's handoff ran before the relay was up. Hand it over now.
+                        console.log(`[relay] Sync done from ${runner}, empty — handing off ${currentBeingId}`);
+                        doHandoff(runner);
                     } else {
                         console.log(`[relay] Sync done from ${runner}, ${remoteConsciousness ? remoteConsciousness.length + ' chars' : 'empty'} — staying in Remote mode`);
                         settings.hostDevice = runner;
