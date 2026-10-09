@@ -106,8 +106,14 @@ in different tabs still run at the same time, since each tab is a separate page.
 | 1 `fix: stop and save the current being before switching` | `leaveBeing()` disables the picker, cancels pending dispatch and auto-infer, aborts the in-flight request, waits for `loop()` to end (the loop now checks `_stopRequested` between steps, since abort alone didn't stop it after `act()`), resets pending input, handoff and overload state, and saves immediately. User actions (`switchBeing`, `newBeing`, duplicate, import, delete) leave first; boot uses the split-out `loadBeing` / `createBeing`. | 1, 2 |
 | 2 `fix: reload the page when switching beings; open a being by ?being=<id>` | After leaving, switching reloads the page as `?being=<id>` (`?new` for a new being), so nothing from the old being's code survives. Boot reads `?being=` and keeps it in the URL; skills are evaluated once at boot. Remote hosts are unaffected: on reconnect the relay already syncs and hands off the current being. | 3, 4 (choose a being) |
 | 3 `fix: keep settings in sync across tabs; one tab per being` | A `storage` listener adopts settings saved by other tabs. Each tab holds a Web Lock (`navigator.locks`) on its being for the life of the page. Picking a being open in another tab is refused with a notice; a tab asking for one opens the next free being, or a new one, and says so. | 4 |
+| 4 `fix: hand the being to the remote host after a switch reload` | With a paired device as host, boot's handoff runs before the relay connects and gives up; the reconnect sync came back empty (the device never had the new being) and the browser stayed in Remote mode without handing it over. Now an empty sync from an idle host hands the current being over. Found by pairing a test device with dev2. | Regression from commit 2 |
+| 5 `fix: merge concurrent settings saves across tabs` | The storage listener alone raced: tabs handle the same `device_status` messages and save at the same moment (WebKit dropped a paired device). Saves are now a 3-way merge: write only what this tab changed since it last read storage onto the current stored copy; removals stay removed. | 4 (race) |
 
 Trade-offs:
+
+- With a single being, opening a second tab creates a new being (every being is already open), and
+  does so on every extra tab. Worth revisiting if that clutters the being list: the alternative is a
+  read-only view, or a prompt instead of auto-creating.
 
 - A switch costs a page load (about a second) and a relay reconnect.
 - Switching mid-reply cancels that reply (the prompt is kept). Switching while the being is running
@@ -182,3 +188,24 @@ Run 2026-10-09, Chromium 154, Linux.
 | **Total** | 0/10 passed, 8 failures, exit 1 | 8/10 passed, 2 known, exit 0 |
 
 The "after" result was the same in two separate runs.
+
+### Further testing (2026-10-09, after commits 4 and 5)
+
+| Test | How | Result |
+|---|---|---|
+| Suite in other engines | `BROWSER=firefox` (Firefox 140) and `BROWSER=webkit` (WebKit 26) | 10/12, 2 known, in Chromium, Firefox and WebKit; on `a1fad55`: 1/12 |
+| Remote host after a switch | A throwaway Linux device (`relay/agent.py` from dev2, isolated `INFERO_DIR`/`HOME`, fake LLM) paired with a headless browser on dev2.infero.net and set as host; switch beings both ways; run a turn; unpair | Before commit 4 the switched-to being never reached the device. After: each switch hands the new being over, the remote turn's reply lands in that being only, the device stays paired while a second tab's relay traffic saves settings, unpair works |
+| Real hub skill `infero_agentic_ui_zh` (issue 3) | Installed from dev's hub into A, English text shown in A, then a new being B | Fires in A. On `a1fad55` its `window.__uiTranslator` observer was still live in B's page; with the fix it's gone and B isn't woken. (B wasn't woken on `a1fad55` either in this run: the skill's own text filter didn't fire on the sentence used) |
+| Switch during an 8 s exec block | Fake reply with a `/browser exec` that awaits 8 s; switch 3 s in | Switch waits ~6 s for the exec, then leaves; reply and exec result saved in A only |
+| Switch during the 15 s error retry | Fake LLM returns HTTP 500; switch 3 s later | Switch in 0.3 s; one failed request, no retry after leaving; prompt kept in A |
+| Three switches fired at once | `switchBeing(B); switchBeing(A); switchBeing(B)` | Ends on B, picker enabled, URL matches |
+| Closing a tab frees its being | Tab 1 on A, tab 2 on B, close tab 1, tab 2 picks A | Tab 2 opens A |
+| Export, delete, import | Export A (Blob read in page), delete A, import | A deleted, re-imported, consciousness identical |
+| Delete every being | Delete until none are left | Boots a fresh being (`?being=…`) |
+| `file://` mode | `file:///…/src/index.html?new`, switch, second tab on the same being | Web Locks available, `?being=` kept, switch works, second tab gets another being |
+| Phone width (390×844) | Second tab on an open being | Notice readable; picker usable |
+| One real LLM turn | dev2.infero.net, default provider (infero) and model (gemini-3.1-pro) | Being answered; no errors |
+| Deployment regression | `regression_e2e.py --env both` | 24/24 |
+
+Not run: `relay/tests` (they need `cryptography`/`websockets` in the system Python to load
+`agent.py`; unchanged by this branch), Safari on iOS, a real Windows/macOS device.
