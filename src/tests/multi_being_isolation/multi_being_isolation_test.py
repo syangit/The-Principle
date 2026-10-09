@@ -9,6 +9,7 @@ Issue 5's checks are known failures (not fixed; see README.md) and don't count.
 
     python3 src/tests/multi_being_isolation/multi_being_isolation_test.py
     CHROME=/usr/bin/chromium-browser python3 src/tests/multi_being_isolation/multi_being_isolation_test.py
+    BROWSER=firefox python3 src/tests/multi_being_isolation/multi_being_isolation_test.py   # or webkit
     python3 src/tests/multi_being_isolation/multi_being_isolation_test.py --json /tmp/isolation.json
 
 Needs: pip install playwright, and a Chromium/Chrome (Playwright's bundled one,
@@ -153,6 +154,10 @@ def open_page(ctx, url):
 
 
 def launch(p):
+    name = os.environ.get("BROWSER", "chromium")
+    if name != "chromium":
+        # No host blocking needed: with these settings the hub and relay point at closed local ports
+        return getattr(p, name).launch(headless=True)
     exe = os.environ.get("CHROME")
     if exe:
         return p.chromium.launch(executable_path=exe, headless=True, args=CHROME_ARGS)
@@ -247,11 +252,20 @@ def main():
             again = "A" if pg2.evaluate("() => currentBeingId") == A else "B" if pg2.evaluate("() => currentBeingId") == B else "a new being"
             check("4a", "reloading a tab reopens the same being", again == "B",
                   f"after reload tab 2 shows {again}")
+            # Back-to-back saves with different changes (no time for the storage event in between)
             pg.evaluate("() => { settings.devices = {TestDevice: {online: false}}; saveSettingsToStorage(settings); }")
-            pg2.evaluate("() => saveSettingsToStorage(settings)")
-            devices = pg.evaluate("() => Object.keys(JSON.parse(localStorage.genesis_settings).devices || {})")
+            pg2.evaluate("() => { settings.vision = 'full'; saveSettingsToStorage(settings); }")
+            stored_now = pg.evaluate("() => JSON.parse(localStorage.genesis_settings)")
+            devices = list((stored_now.get("devices") or {}).keys())
             check("4b", "a device paired in tab 1 survives a settings save in tab 2", "TestDevice" in devices,
                   f"saved devices after tab 2's save: {devices}")
+            check("4b", "both tabs' changes are kept", "TestDevice" in devices and stored_now.get("vision") == "full",
+                  f"devices={devices}, vision={stored_now.get('vision')}")
+            pg.evaluate("() => { delete settings.devices.TestDevice; saveSettingsToStorage(settings); }")
+            pg2.evaluate("() => saveSettingsToStorage(settings)")
+            devices = pg.evaluate("() => Object.keys(JSON.parse(localStorage.genesis_settings).devices || {})")
+            check("4b", "a device removed in tab 1 stays removed after tab 2 saves", "TestDevice" not in devices,
+                  f"saved devices: {devices}")
             # Tab 1 has A open; tab 2 (on B) tries to switch to it through the picker.
             pg2.select_option("#being-select", A)
             time.sleep(3)
@@ -266,6 +280,7 @@ def main():
                   f"new tab opened {label}")
             pg3.close()
             pg2.close()
+            time.sleep(0.5)   # let the closed tab release B's lock (WebKit takes ~0.1 s)
 
             print("\n[5] No access boundary between beings")
             switch(pg, B); settle(pg)
