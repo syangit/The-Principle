@@ -1566,41 +1566,58 @@ Detailed principles, philosophy, and self-modification mechanics are loaded as S
         // Settings are shared by every tab, and tabs save concurrently (each relay connection
         // handles device_status). Saves are a 3-way merge: write only what this tab changed since
         // it last read storage (_settingsBase) onto the current stored copy, then adopt the result.
+        // Devices merge as a union, because a read can be stale (WebKit syncs localStorage between
+        // tabs asynchronously): a device is only dropped through a removal marker (removedDevices,
+        // keyed by its key, so re-pairing the same name isn't blocked), never by being absent.
         function _readStoredSettings() {
             try { return JSON.parse(localStorage.getItem('genesis_settings') || '{}'); } catch { return {}; }
         }
         let _settingsBase = _readStoredSettings();
+        const _sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+        const _deviceTomb = (name, d) => (d && d.keyB64) || ('name:' + name);
+        function _withoutRemoved(devs, tomb) {
+            const out = {};
+            for (const [n, d] of Object.entries(devs)) if (!tomb[_deviceTomb(n, d)]) out[n] = d;
+            return out;
+        }
         function _adoptSettings(s, from) {
-            const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
             const devs = from.devices || {}, target = s.devices || (s.devices = {});
             for (const n of Object.keys(target)) if (!(n in devs)) delete target[n];
-            for (const n of Object.keys(devs)) if (!same(target[n], devs[n])) target[n] = devs[n];
-            for (const k of Object.keys(from)) if (k !== 'devices' && !same(s[k], from[k])) s[k] = from[k];
+            for (const n of Object.keys(devs)) if (!_sameJSON(target[n], devs[n])) target[n] = devs[n];
+            for (const k of Object.keys(from)) if (k !== 'devices' && !_sameJSON(s[k], from[k])) s[k] = from[k];
         }
         function saveSettingsToStorage(s) {
-            const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
             const stored = _readStoredSettings(), base = _settingsBase, out = { ...stored };
             for (const k of new Set([...Object.keys(s), ...Object.keys(base)])) {
-                if (k === 'devices') continue;
+                if (k === 'devices' || k === 'removedDevices') continue;
                 if (!(k in s)) delete out[k];
-                else if (!same(s[k], base[k])) out[k] = s[k];
+                else if (!_sameJSON(s[k], base[k])) out[k] = s[k];
             }
-            const mine = s.devices || {}, was = base.devices || {}, devs = { ...(stored.devices || {}) };
-            for (const n of new Set([...Object.keys(mine), ...Object.keys(was)])) {
-                if (!(n in mine)) delete devs[n];                    // removed in this tab
-                else if (!same(mine[n], was[n])) devs[n] = mine[n];  // added or changed in this tab
-            }
-            out.devices = devs;
+            const mine = s.devices || {}, was = base.devices || {};
+            const tomb = { ...(stored.removedDevices || {}), ...(s.removedDevices || {}) };
+            for (const n of Object.keys(was)) if (!(n in mine)) tomb[_deviceTomb(n, was[n])] = Date.now();  // removed here
+            const devs = { ...(stored.devices || {}) };
+            for (const n of Object.keys(mine)) if (!(n in devs) || !_sameJSON(mine[n], was[n])) devs[n] = mine[n];
+            const monthAgo = Date.now() - 30 * 864e5;
+            for (const t of Object.keys(tomb)) if (tomb[t] < monthAgo) delete tomb[t];
+            out.devices = _withoutRemoved(devs, tomb);
+            out.removedDevices = tomb;
             localStorage.setItem('genesis_settings', JSON.stringify(out));
             _settingsBase = JSON.parse(JSON.stringify(out));
             _adoptSettings(s, out);                                  // pick up other tabs' changes too
         }
         var settings = loadSettings();
-        // Another tab saved settings: adopt them now (the merge above covers saves that race this event)
+        // Another tab saved settings: adopt them now. If its copy lacks a device this tab still has
+        // (and didn't mark removed), it wrote from a stale read: keep the device and re-publish it.
         window.addEventListener('storage', e => {
             if (e.key !== 'genesis_settings' && e.key !== null) return;
             _settingsBase = _readStoredSettings();
-            _adoptSettings(settings, loadSettings());
+            const fresh = loadSettings(), incoming = fresh.devices || {};
+            const tomb = { ...(settings.removedDevices || {}), ...(fresh.removedDevices || {}) };
+            const merged = _withoutRemoved({ ...(settings.devices || {}), ...incoming }, tomb);
+            const restore = e.key !== null && Object.keys(merged).some(n => !(n in incoming));
+            _adoptSettings(settings, { ...fresh, removedDevices: tomb, devices: merged });
+            if (restore) saveSettingsToStorage(settings);
             try { renderDeviceList(); } catch (_) {}
         });
         // Overload fallback chain (anthropic API ids), mirrors agent.py _OVERLOAD_CHAIN.
@@ -2438,8 +2455,17 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
         // Switching reloads the page: the old being's skill code (timers, observers,
         // listeners, prototype patches) can't keep running and act on the new being.
         // One tab per being: a tab holds a Web Lock on the being it shows for the life of the
-        // page (switching reloads, which releases it), so two tabs never run the same being.
+        // page, so two tabs never run the same being. The lock is released explicitly before
+        // navigating away: browsers may keep the old page in the back/forward cache, still
+        // holding its lock, and this tab would then see its own previous being as "open elsewhere".
         const _beingLockName = id => 'genesis-being:' + id;
+        let _releaseBeingLock = null;
+        function _leavePage(url) {
+            if (_releaseBeingLock) { _releaseBeingLock(); _releaseBeingLock = null; }
+            location.assign(url);
+        }
+        // Restored from the back/forward cache: the lock was given up on leaving, so reload
+        window.addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
         function _lockBeing(id, waitMs = 0) {
             if (!navigator.locks) return Promise.resolve(true);
             return new Promise(resolve => {
@@ -2447,7 +2473,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 const opts = waitMs ? { signal: AbortSignal.timeout(waitMs) } : { ifAvailable: true };
                 navigator.locks.request(_beingLockName(id), opts, lock => {
                     resolve(!!lock);
-                    if (lock) return new Promise(() => {});   // held until the page unloads
+                    if (lock) return new Promise(r => { _releaseBeingLock = r; });   // held until released or unload
                 }).catch(() => resolve(false));               // timed out: open in another tab
             });
         }
@@ -2475,7 +2501,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 beingSelect.value = currentBeingId;
                 throw e;
             }
-            location.assign(_beingUrl(id));
+            _leavePage(_beingUrl(id));
         }
 
         async function loadBeing(id) {
@@ -2525,7 +2551,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             try {
                 await leaveBeing();
             } catch (e) { beingSelect.disabled = false; throw e; }
-            location.assign(_beingUrl(null));
+            _leavePage(_beingUrl(null));
         }
 
         async function createBeing() {
@@ -2582,7 +2608,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
             consciousness += note;
             await saveBeing();
             try { await seedDefaultSkills(currentBeingId); } catch (e) { console.error('[duplicateBeing] seed failed', e); }
-            location.assign(_beingUrl(currentBeingId));
+            _leavePage(_beingUrl(currentBeingId));
         }
 
         async function deleteBeing() {
@@ -2590,7 +2616,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 await leaveBeing();
                 await DB.del(`${currentBeingId}/consciousness.txt`);
                 await DB.del(currentBeingId);
-                location.assign(location.pathname);   // boot picks the most recent being
+                _leavePage(location.pathname);   // boot picks the most recent being
             }
         }
 
@@ -2618,7 +2644,7 @@ UI: verdict renders at #canvas-container > #html-div > #hub-overlay-upload.`,
                 }
                 await leaveBeing();
                 for (const r of records) await DB.put(r);
-                location.assign(_beingUrl(sourceId));
+                _leavePage(_beingUrl(sourceId));
                 return;
             } catch(e) {
                 beingSelect.disabled = false;

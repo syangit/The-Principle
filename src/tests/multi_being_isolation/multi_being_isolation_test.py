@@ -81,6 +81,9 @@ def start_server():
 # inside a Playwright call, so routed requests would stall the page during time.sleep().
 CHROME_ARGS = ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, "
                + ", ".join(f"EXCLUDE {h}" for h in ALLOWED_HOSTS)]
+# Playwright turns the back/forward cache off; real Chrome has it on, and a page kept there
+# still holds its being's Web Lock (switching A -> B -> A in one tab used to be refused).
+CHROME_KEEP = dict(ignore_default_args=["--disable-back-forward-cache"])
 
 
 def wait_idle(pg, timeout=30):
@@ -160,13 +163,13 @@ def launch(p):
         return getattr(p, name).launch(headless=True)
     exe = os.environ.get("CHROME")
     if exe:
-        return p.chromium.launch(executable_path=exe, headless=True, args=CHROME_ARGS)
+        return p.chromium.launch(executable_path=exe, headless=True, args=CHROME_ARGS, **CHROME_KEEP)
     try:
-        return p.chromium.launch(headless=True, args=CHROME_ARGS)
+        return p.chromium.launch(headless=True, args=CHROME_ARGS, **CHROME_KEEP)
     except Exception:
         for exe in ("/usr/bin/chromium-browser", "/usr/bin/chromium", "/usr/bin/google-chrome"):
             if os.path.exists(exe):
-                return p.chromium.launch(executable_path=exe, headless=True, args=CHROME_ARGS)
+                return p.chromium.launch(executable_path=exe, headless=True, args=CHROME_ARGS, **CHROME_KEEP)
         raise
 
 
