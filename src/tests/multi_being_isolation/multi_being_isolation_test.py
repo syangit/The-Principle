@@ -124,12 +124,20 @@ def wait_boot(pg):
     wait_until(pg, "() => " + BOOTED)
 
 
-def switch(pg, bid):
-    """Switch through the being picker, like a user. Works whether or not switching reloads."""
-    if pg.evaluate("() => currentBeingId") == bid:
-        return
-    pg.select_option("#being-select", bid)
-    wait_until(pg, "id => currentBeingId === id && " + BOOTED + " && !beingSelect.disabled", bid)
+def switch(pg, bid, tries=3):
+    """Switch through the being picker, like a user. Works whether or not switching reloads.
+    A refused pick is retried, as a user would; check 8 tests that the first pick works."""
+    done = "id => currentBeingId === id && " + BOOTED + " && !beingSelect.disabled"
+    for _ in range(tries):
+        if pg.evaluate("() => currentBeingId") == bid:
+            break
+        pg.select_option("#being-select", bid)
+        try:
+            wait_until(pg, done, bid, timeout=20)
+            return
+        except RuntimeError:
+            pass
+    wait_until(pg, done, bid)
 
 
 def new_being(pg):
@@ -175,9 +183,9 @@ def launch(p):
 
 # --- Tests --------------------------------------------------------------------
 checks = []
-# Issue 5 needs a per-being origin or per-being encryption (see README.md); its checks are
-# expected to fail and don't affect the exit code. A pass here is reported as UNEXPECTED.
-KNOWN = {5}
+# Issue 5 needs a per-being origin or per-being encryption, issue 9 isn't fixed yet (see README.md);
+# their checks are expected to fail and don't affect the exit code. A pass is reported as UNEXPECTED.
+KNOWN = {5, 9}   # 9: duplicate labels for unnamed beings (open, see README.md)
 
 
 def check(num, name, ok, detail):
@@ -209,6 +217,9 @@ def main():
             B = pg.evaluate("() => currentBeingId")
             ids = {"A": A, "B": B}
             print(f"beings: A={A[:16]}…  B={B[:16]}…")
+            # Labels in the being picker before anyone has typed to either being (checked in [9])
+            labels = dict(pg.evaluate("() => [...beingSelect.options].map(o => [o.value, o.textContent])"))
+            labels = {"A": labels.get(A), "B": labels.get(B)}
 
             print("\n[1] Switching mid-loop writes A's turn into B")
             switch(pg, A); settle(pg)
@@ -243,6 +254,22 @@ def main():
             where = holders(pg, "TASK-LEAK3", ids)
             check(3, "A's timer does not wake B", "B" not in where,
                   f"prompt from A's timer landed in {where or 'none'}")
+
+            print("\n[8] Switching back to a being this tab showed before")
+            # Bug: the page left behind sat in the back/forward cache still holding A's lock, so the
+            # first pick was refused as "open in another tab" (Chromium here runs with that cache on).
+            switch(pg, A); settle(pg); switch(pg, B); settle(pg)
+            pg.select_option("#being-select", A)                       # one pick, no retry
+            try:
+                wait_until(pg, "id => currentBeingId === id && " + BOOTED, A, timeout=15)
+            except RuntimeError:
+                pass
+            on = "A" if pg.evaluate("() => currentBeingId") == A else "B"
+            note = pg.evaluate("() => [...document.querySelectorAll('#chat-box .msg')].some(m => /open in another tab/.test(m.textContent))")
+            check(8, "one pick switches back to a being this tab showed before", on == "A" and not note,
+                  f"after one pick of A: on {on}; 'open in another tab' notice={note}")
+            if on != "A":
+                switch(pg, A)
 
             print("\n[4] Multiple tabs")
             switch(pg, A); settle(pg)
@@ -293,6 +320,12 @@ def main():
             wrote = pg.evaluate("async a => { await DB.put({id: a + '/probe', value: 'by-B'});"
                                 " return (await DB.get(a + '/probe'))?.value === 'by-B'; }", A)
             check(5, "B cannot write A's records", not wrote, f"B wrote {A[:8]}…/probe={wrote}")
+
+            print("\n[9] Labels of beings that haven't named themselves")
+            # Bug: the title is the first non-system paragraph of the consciousness, which for a being
+            # that spoke first is part of its own reply (here '/call_for_human'), so labels collide.
+            check(9, "two fresh beings get different labels in the being picker", labels["A"] != labels["B"],
+                  f"A={labels['A']!r}, B={labels['B']!r}")
             br.close()
     finally:
         srv.shutdown()
