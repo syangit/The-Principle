@@ -284,7 +284,7 @@ script (see Further testing).
 | Run | Result |
 |---|---|
 | Main test, Chromium 154 (back/forward cache on) | 11/14 passed, 3 known (5 read, 5 write, 9), 0 failures, exit 0 |
-| Main test, Firefox 140 and WebKit 26 | 11/14 each, 3 known, exit 0 (check 8 passes there regardless: their back/forward cache stays off under Playwright) |
+| Main test, Firefox 140 and WebKit 26 | 11/14 each, 3 known, exit 0 (check 8 is only shown to catch bug 8 in Chromium; whether Playwright's Firefox/WebKit keep a back/forward cache wasn't checked) |
 | Main test on `ef4e432` (before commit 6) | 10/14: check 8 FAIL ("on B; 'open in another tab' notice=True"), 3 known |
 | `remote_host_test.py` on dev2.infero.net | 9/9 passed; relay left with no test tokens |
 
