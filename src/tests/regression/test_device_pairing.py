@@ -8,7 +8,6 @@ import threading
 
 import pytest
 
-from harness.bugs import known_bug
 
 CFH = "\n\n/call_for_human"
 
@@ -140,8 +139,7 @@ def test_remove_device_from_browser(paired):
     app.until_py(lambda: "Removed from" in agent.log_text(), timeout=20, msg="agent told it was removed")
     app.until_py(lambda: agent.instances() == [], msg="agent forgot the instance")
     app.wait(10000)          # the relay announces offline after an 8 s debounce
-    with known_bug("BUG-08", reason="the 'deleted' note needs the device in settings, which removal already cleared"):
-        assert any(f"{agent.name} deleted" in t for r, t in app.chat() if r == "system")
+    assert any(f"{agent.name} deleted" in t for r, t in app.chat() if r == "system")
 
 
 @pytest.mark.case("10.10")

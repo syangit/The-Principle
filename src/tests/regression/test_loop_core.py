@@ -137,8 +137,7 @@ def test_stop_in_gap_between_cycles(app, server):
     app.wait(300)                 # act() has nothing to run; now in the 1 s pause before the next cycle
     app.click_send()
     app.wait(2500)
-    with known_bug("BUG-01", reason="Stop in the pause between cycles starts the next cycle at once"):
-        assert n_llm(server) == 1
+    assert n_llm(server) == 1
 
 
 @pytest.mark.case("1.11")

@@ -90,8 +90,7 @@ def test_custom_cache_endpoint_survives_reload(app, server):
     close_panel(app)
     assert app.js("() => PROVIDERS.custom.cacheEndpoint") == f"{server.base}/mock/cache"
     app.reload()
-    with known_bug("BUG-07", reason="custom cache endpoint is only applied when the settings panel closes"):
-        assert app.js("() => PROVIDERS.custom.cacheEndpoint") == f"{server.base}/mock/cache"
+    assert app.js("() => PROVIDERS.custom.cacheEndpoint") == f"{server.base}/mock/cache"
 
 
 # ---- settings across tabs (isolation fix) -----------------------------------------------------
@@ -129,10 +128,8 @@ def test_reset_all_data(app, server):
     app._call_may_navigate("() => [...document.querySelectorAll('#settings-panel span')]"
                            ".find(s => s.textContent.includes('Reset all data')).click()")
     webkit = app.page.context.browser.browser_type.name == "webkit"
-    with known_bug("BUG-11", unless=not webkit, reason="WebKit: the data survives (deleteDatabase is blocked, page reloads first)",
-                   intermittent=True):
-        app.until("old => typeof currentBeingId !== 'undefined' && currentBeingId && currentBeingId !== old", old,
-                  timeout=20 if webkit else 40, msg="page reloaded with a fresh being")
+    app.until("old => typeof currentBeingId !== 'undefined' && currentBeingId && currentBeingId !== old", old,
+              timeout=20 if webkit else 40, msg="page reloaded with a fresh being")
     app.wait_boot()
     app.stop_auto_infer()
     assert app.being_id != old and app.beings() == [app.being_id]
@@ -145,13 +142,12 @@ def test_reset_all_data(app, server):
 def test_attach_image(app):
     import base64
     app.upload("#file-input", "red dot.png", base64.b64decode(PNG), "image/png")
-    with known_bug("BUG-10", unless=app.page.context.browser.browser_type.name != "webkit",
-                   reason="WebKit (private/ephemeral storage) can't store a File in IndexedDB"):
-        app.until("() => document.getElementById('input').value.includes('/view ')", timeout=5)
+    app.until("() => document.getElementById('input').value.includes('/view ')", timeout=5)
     line = app.js("() => document.getElementById('input').value").strip()
     key = line.split(" ", 1)[1]
     assert key.startswith(f"{app.being_id}/uploads/") and key.endswith("_red_dot.png")
-    assert app.js("k => DB.get(k).then(r => r.value instanceof Blob)", key)
+    assert app.js("k => DB.get(k).then(r => r.value.startsWith('data:image/png;base64,'))", key)
+    assert app.js("k => _resolveViewRef(k).then(v => v.media_type)", key) == "image/png"   # what /view reads
     assert app.js("() => sendBtn.textContent") == "Send"
 
 

@@ -16,7 +16,6 @@ import threading
 import pytest
 
 from harness import FORMAT_MODELS, Reply
-from harness.bugs import known_bug
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "relay", "tests")))
 from agent_loader import load_agent  # noqa: E402
@@ -77,6 +76,11 @@ def worker(agent, consciousness="", core_mem="", skills=None, realtime="", llm=N
     return w
 
 
+def agent_llm(app, **extra):
+    """The model settings the page sends a device host (loop_handoff / settings_update)."""
+    return {**app.js("() => agentModelSettings()"), **extra}
+
+
 def js_payload(app, consciousness, **settings):
     app.set_settings(**settings)
     return app.js("""async c => { consciousness = c; const p = await buildPayload();
@@ -115,32 +119,30 @@ def test_stop_words_match(fnapp, agent, fmt):
     py = worker(agent, CONV)._build_payload(fmt, "m", "sys", False)
     get = {"gemini": lambda p: p["generationConfig"]["stopSequences"], "openai": lambda p: p.get("stop"),
            "anthropic": lambda p: p["stop_sequences"]}[fmt]
-    with known_bug("DRIFT-1", reason="agent.py has no '\\n**Digital Being' stop word"):
-        assert get(py) == get(js)
+    assert get(py) == get(js)
 
 
 @pytest.mark.case("13.01")
 def test_openai_model_without_stop_words(fnapp, agent):
     js = js_payload(fnapp, CONV, model="gpt-5.4")["p"]
-    py = worker(agent, CONV)._build_payload("openai", "gpt-5.4", "sys", False)
+    py = worker(agent, CONV, llm=agent_llm(fnapp))._build_payload("openai", "gpt-5.4", "sys", False)
     assert "stop" not in js
-    with known_bug("DRIFT-2", reason="agent.py always sends stop words, even for models marked stop:false"):
-        assert "stop" not in py
+    assert "stop" not in py
 
 
 @pytest.mark.case("13.01")
 @pytest.mark.parametrize("case", ["glm-thinking", "deepseek-off", "adaptive-on"])
 def test_openai_thinking_params_match(fnapp, agent, case):
-    model, provider, thinking, mode = {
-        "glm-thinking": ("glm-5.3", "custom", True, None),
-        "deepseek-off": ("deepseek-v4-flash", "deepseek", False, None),
-        "adaptive-on": ("gpt-6.1-sol", "custom", True, None),
+    model, provider, thinking = {
+        "glm-thinking": ("glm-5.3", "custom", True),
+        "deepseek-off": ("deepseek-v4-flash", "deepseek", False),
+        "adaptive-on": ("gpt-6.1-sol", "custom", True),
     }[case]
     js = js_payload(fnapp, CONV, model=model, provider=provider, thinking=thinking)["p"]
-    py = worker(agent, CONV, llm={"thinking_mode": mode})._build_payload("openai", js["model"], "sys", thinking)
+    llm = agent_llm(fnapp, provider=provider)
+    py = worker(agent, CONV, llm=llm)._build_payload("openai", js["model"], "sys", thinking)
     keys = ("thinking", "reasoning", "temperature")
-    with known_bug("DRIFT-3", reason="agent.py's OpenAI body has no thinking / reasoning parameters"):
-        assert {k: py.get(k) for k in keys} == {k: js.get(k) for k in keys}
+    assert {k: py.get(k) for k in keys} == {k: js.get(k) for k in keys}
 
 
 @pytest.mark.case("13.01")
@@ -197,8 +199,7 @@ def test_stable_head_skill_details_match(fnapp, agent):
     w.being_id, w.consciousness, w.metadata, w.llm_settings = "match_being", "", {}, {}
     w._last_realtime, w._log = "", (lambda *a, **k: None)
     py = w._build_payload("openai", "m", "sys", False)
-    with known_bug("DRIFT-4", reason="agent.py's skill list leaves out code_readme"):
-        assert "README-ZZ" in py["messages"][1]["content"][0]["text"]
+    assert "README-ZZ" in py["messages"][1]["content"][0]["text"]
 
 
 # ---- 13.02 exec block parsing ---------------------------------------------------------------
@@ -272,9 +273,7 @@ def test_stop_continue_decision_matches(app, server, agent, name):
     py_cont = py_continues(agent, reply)
     if expected is not None:
         assert js_cont == expected
-    with known_bug("DRIFT-5", unless=name != "both",
-                   reason="with both signals in the tail the browser stops, agent.py continues"):
-        assert py_cont == js_cont
+    assert py_cont == js_cont
 
 
 # ---- 13.04 compression ---------------------------------------------------------------------------
@@ -286,9 +285,9 @@ def norm_gaps(s):
     return re.sub(r"\[gap \d+:", "[gap N:", s)
 
 
-def py_compress(agent, consciousness, tokens, cfg):
+def py_compress(agent, consciousness, tokens, llm):
     d = tempfile.mkdtemp(prefix="infero-match-compress-")
-    w = worker(load_agent(d), consciousness, llm={"compressCfg": cfg})
+    w = worker(load_agent(d), consciousness, llm=llm)
     w._last_prompt_tokens = tokens
     w._maybe_compress_consciousness()
     return w.consciousness
@@ -306,24 +305,21 @@ def js_compress(app, consciousness, tokens, model):
 @pytest.mark.case("13.04")
 def test_compression_matches_with_model_config(fnapp, agent):
     c = numbered(200_000)
-    cfg = fnapp.js("() => MODEL_LIST['claude-sonnet-5.5'].compress")
     js = js_compress(fnapp, c, 150_000, "claude-sonnet-5.5")
-    py = py_compress(agent, c, 150_000, cfg)
+    assert agent_llm(fnapp)["compressCfg"], "this case needs a model with a compress block"
+    py = py_compress(agent, c, 150_000, agent_llm(fnapp))
     assert js != c
     assert norm_gaps(py) == norm_gaps(js)
 
 
 @pytest.mark.case("13.04")
 def test_compression_limit_without_model_config(fnapp, agent):
-    """deepseek-v4-flash: maxContext 1M, no compress block. The browser compresses at 2/3 of maxContext;
-    the agent gets compressCfg=null from the browser and uses 300k."""
+    """deepseek-v4-flash: maxContext 1M, no compress block. Both sides compress at 2/3 of maxContext."""
     c = numbered(500_000)
     js = js_compress(fnapp, c, 400_000, "deepseek-v4-flash")
-    cfg = fnapp.js("() => MODEL_LIST['deepseek-v4-flash'].compress || null")
-    py = py_compress(agent, c, 400_000, cfg)
+    py = py_compress(agent, c, 400_000, agent_llm(fnapp))
     assert js == c, "browser: 400k < 666k, no compression"
-    with known_bug("DRIFT-6", reason="agent.py ignores maxContext and compresses at 300k"):
-        assert py == c
+    assert py == c
 
 
 # ---- 13.05 overload chain --------------------------------------------------------------------------
@@ -376,8 +372,7 @@ def test_openai_usage_chunk_with_empty_choices(app, server, agent):
     js = js_infer(app, server, "openai", r)
     assert js["turn"].startswith("answer text")
     py = py_infer(agent, server, "openai", r)
-    with known_bug("DRIFT-9", reason="agent.py raises IndexError on choices: [] and drops the whole reply"):
-        assert py["text"] and py["text"].startswith("answer text")
+    assert py["text"] and py["text"].startswith("answer text")
 
 
 @pytest.mark.case("13.06")
@@ -399,8 +394,7 @@ def test_openai_reasoning_field_matches(app, server, agent):
     w.send_relay = capture
     run_async(w.infer)
     done = [p for p in seen.get("payloads", []) if p.get("done")][0]
-    with known_bug("DRIFT-7", reason="agent.py ignores delta.reasoning"):
-        assert done["thinking"] == "THOUGHTS"
+    assert done["thinking"] == "THOUGHTS"
 
 
 @pytest.mark.case("13.06")
@@ -410,8 +404,7 @@ def test_trailing_header_stripped_both_sides(app, server, agent):
     app.wait_idle()
     py = py_infer(agent, server, "gemini", r)
     assert "2026-01-01" not in js["turn"]
-    with known_bug("DRIFT-8", reason="agent.py strips only a leading model-written header"):
-        assert "2026-01-01" not in py["turn"]
+    assert "2026-01-01" not in py["turn"]
 
 
 # ---- 10.04 – 10.06 pairing crypto -------------------------------------------------------------------

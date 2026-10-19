@@ -44,7 +44,9 @@ def test_new_being(app, server):
 def test_new_being_session_identity_is_its_own(app):
     """The identity the page signs hub requests with must be the being's own."""
     bid = app.being_id
-    with known_bug("BUG-04", reason="identity_seed's init runs before the being id is set"):
+    app.until("() => !!window._identity", msg="identity loaded")
+    app.wait(1000)                # the stray init writes its record asynchronously (Firefox: after boot)
+    with known_bug("BUG-04", reason="identity_seed's init runs before the being id is set", intermittent=True):
         assert app.db_get("null/identity") is None, "no stray identity record (written on every first boot)"
         assert app.js("() => window.identityInit().then(i => i.pubkey)") == bid
 

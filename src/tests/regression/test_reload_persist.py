@@ -1,7 +1,6 @@
 """Reload tests — saving and restoring a being's state (checklist area 7)."""
 import pytest
 
-from harness.bugs import known_bug
 
 CFH = "\n\n/call_for_human"
 
@@ -26,8 +25,7 @@ def test_reload_right_after_a_change_keeps_it(app, server):
     app.page.reload()             # well inside the 3 s save delay
     app.wait_boot()
     app.stop_auto_infer()
-    with known_bug("BUG-05", reason="no save when the page is closed or reloaded; the last ~3 s are lost"):
-        assert "fresh words" in app.stored(bid)
+    assert "fresh words" in app.stored(bid)
 
 
 @pytest.mark.case("7.03", "7.04")

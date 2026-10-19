@@ -5,7 +5,6 @@ exactly those delays with App.fast_timers so the logic runs unchanged, just quic
 import pytest
 
 from harness import Reply
-from harness.bugs import known_bug
 
 CFH = "\n\n/call_for_human"
 
@@ -35,8 +34,7 @@ def test_stop_during_retry_wait(app, server):
     app.until(r"() => [...document.querySelectorAll('#chat-box .system')].some(d => d.innerText.includes('HTTP 500'))")
     app.click_send()
     app.wait(4500)
-    with known_bug("BUG-01", reason="Stop during the retry wait starts the retry at once"):
-        assert len(server.llm_requests()) == 1
+    assert len(server.llm_requests()) == 1
 
 
 @pytest.mark.case("2.03")

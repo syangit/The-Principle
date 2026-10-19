@@ -39,7 +39,7 @@ Already covered elsewhere is noted as *(isolation N)* = `multi_being_isolation_t
 - [x] **1.07** `Loop` P1 — Messages sent while the loop runs are merged into one input for the next cycle.
 - [x] **1.08** `Loop` P2 — Empty reply stops the loop.
 - [x] **1.09** `Loop` P1 ★ — Stop button (empty input while running) aborts the stream; no further cycle. *(isolation 1, partly)*
-- [x] **1.10** `Loop` P2 — Stop during the 1 s gap between cycles prevents the next cycle. — known bug on dev: BUG-01
+- [x] **1.10** `Loop` P2 — Stop during the 1 s gap between cycles prevents the next cycle. — was BUG-01 (fixed)
 - [x] **1.11** `Loop` P2 — Send button with empty input while idle starts a cycle with no user text ("Go").
 - [x] **1.12** `Loop` P2 — `trigger(msg)` from page JS starts a cycle after its delay; `trigger(obj)` sends JSON.
 - [x] **1.13** `Loop` P2 — Repeated `trigger()` calls inside the delay start only one cycle.
@@ -52,7 +52,7 @@ Already covered elsewhere is noted as *(isolation N)* = `multi_being_isolation_t
 ## 2. Errors and retries
 
 - [x] **2.01** `Loop` P1 — HTTP 500 → `System - [HTTP 500]` in chat and consciousness; retry after 15 s.
-- [x] **2.02** `Loop` P1 — Stop during the 15 s retry wait cancels the retry. — known bug on dev: BUG-01
+- [x] **2.02** `Loop` P1 — Stop during the 15 s retry wait cancels the retry. — was BUG-01 (fixed)
 - [x] **2.03** `Loop` P2 — Server unreachable → `Network Unreachable` label.
 - [x] **2.04** `Loop` P2 — Connection dropped mid-stream → `Connection Reset` label; partial reply not written as a turn.
 - [x] **2.05** `Loop` P2 — No response headers in 90 s → `Timeout` label (run with a shortened timeout hook or skip by default).
@@ -105,7 +105,7 @@ Already covered elsewhere is noted as *(isolation N)* = `multi_being_isolation_t
 - [x] **4.15** `Fn` P2 — Text that merely contains the bridge delimiters (no gap lines) is not removed.
 - [x] **4.16** `Fn` P2 — Per-model `compress.head` / `compress.tail` settings are used.
 - [x] **4.17** `Fn` P2 — Compression clears the Gemini cache state and the prompt-token count.
-- [x] **4.18** `Reload` P2 — The custom provider's cache endpoint (settings panel) still applies after a reload. — known bug on dev: BUG-07
+- [x] **4.18** `Reload` P2 — The custom provider's cache endpoint (settings panel) still applies after a reload. — was BUG-07 (fixed)
 
 ## 5. Code execution and `/view`
 
@@ -146,7 +146,7 @@ Already covered elsewhere is noted as *(isolation N)* = `multi_being_isolation_t
 ## 7. Saving and restoring
 
 - [x] **7.01** `Reload` P1 ★ — Consciousness saved ~3 s after a change and restored on reload.
-- [x] **7.02** `Reload` P1 ★ — Leaving the page within 3 s of a change still saves it. *(isolation 2 covers the switch case)* — known bug on dev: BUG-05
+- [x] **7.02** `Reload` P1 ★ — Leaving the page within 3 s of a change still saves it. *(isolation 2 covers the switch case)* — was BUG-05 (fixed)
 - [x] **7.03** `Reload` P1 ★ — `#html-div` content restored after reload.
 - [x] **7.04** `Reload` P1 ★ — Form values in `#html-div` (text input, textarea, select, checkbox, radio) restored.
 - [x] **7.05** `Reload` P2 — Click or keypress inside `#html-div` schedules a save.
@@ -206,7 +206,7 @@ Already covered elsewhere is noted as *(isolation N)* = `multi_being_isolation_t
 - [x] **10.06** `Match` P2 — Verification words (BIP39) are the same on both sides.
 - [x] **10.07** `Fn` P2 — gzip'd sync chunks are reassembled and unzipped (`handleSyncChunk`, `gunzip`).
 - [x] **10.08** `Device` P2 — Rekey a device: new key works, old key rejected.
-- [x] **10.09** `Device` P2 — Remove a device from the browser: agent told, device gone from the list. — known bug on dev: BUG-08
+- [x] **10.09** `Device` P2 — Remove a device from the browser: agent told, device gone from the list. — was BUG-08 (fixed)
 - [x] **10.10** `Device` P2 — Device removes itself → browser updates.
 - [x] **10.11** `Device` P2 — Relay restart keeps paired devices (`tokens.json`).
 - [x] **10.12** `Device` P2 — Decrypt failure on the agent is reported to the browser in plain text.
@@ -239,12 +239,12 @@ Already covered elsewhere is noted as *(isolation N)* = `multi_being_isolation_t
 
 ## 13. `agent.py` loop (and matching the browser)
 
-- [x] **13.01** `Match` P1 — Same consciousness, core_mem and skills → same request body from `_build_payload` and `buildPayload`, for each of the 3 formats. — known bug on dev: DRIFT-1, DRIFT-2, DRIFT-3, DRIFT-4
+- [x] **13.01** `Match` P1 — Same consciousness, core_mem and skills → same request body from `_build_payload` and `buildPayload`, for each of the 3 formats. — was DRIFT-1, DRIFT-2, DRIFT-3, DRIFT-4 (fixed)
 - [x] **13.02** `Match` P1 — Same exec-block text → same blocks found.
-- [x] **13.03** `Match` P1 — Same stop/continue decision for the same reply tail. — known bug on dev: DRIFT-5
-- [x] **13.04** `Match` P1 — Same compression result (cut points, bridge block, saved middle). — known bug on dev: DRIFT-6
+- [x] **13.03** `Match` P1 — Same stop/continue decision for the same reply tail. — was DRIFT-5 (fixed)
+- [x] **13.04** `Match` P1 — Same compression result (cut points, bridge block, saved middle). — was DRIFT-6 (fixed)
 - [x] **13.05** `Match` P2 — Same overload chain.
-- [x] **13.06** `Match` P2 — Same SSE parsing result for the same stream, per format. — known bug on dev: DRIFT-7, DRIFT-8, DRIFT-9
+- [x] **13.06** `Match` P2 — Same SSE parsing result for the same stream, per format. — was DRIFT-7, DRIFT-8, DRIFT-9 (fixed)
 - [x] **13.07** `Device` P2 — `/exec python` runs; hung code stopped after 30 s.
 - [x] **13.08** `Device` P2 — `trigger.txt` and `wake_me_up_when(sec)` wake the agent loop.
 - [x] **13.09** `Device` P2 — Skill code: shell and Python variants run on agent start.
